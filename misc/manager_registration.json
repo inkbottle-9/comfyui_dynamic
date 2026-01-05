@@ -1,0 +1,11 @@
+{
+    "author": "inkbottle-9",
+    "title": "comfyui_dynamic",
+    "id": "comfyui_dynamic",
+    "reference": "https://github.com/inkbottle-9/comfyui_dynamic",
+    "files": [
+        "https://github.com/inkbottle-9/comfyui_dynamic"
+    ],
+    "install_type": "git-clone",
+    "description": "Adds a full-featured Python script node to ComfyUI"
+}

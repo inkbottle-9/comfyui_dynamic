@@ -1,0 +1,14 @@
+[project]
+name = "comfyui_dynamic"
+description = "Adds a full-featured Python script node to ComfyUI"
+version = "v0.0.0"
+license = { file = "LICENSE.md" }
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/inkbottle-9/comfyui_dynamic"
+
+[tool.comfy]
+PublisherId = "inkbottle-9"
+DisplayName = "comfyui_dynamic"
+Icon = ""
