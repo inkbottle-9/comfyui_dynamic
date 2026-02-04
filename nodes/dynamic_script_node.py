@@ -16,56 +16,64 @@ from ..core.utils import ByPassTypeTuple
 
 # 允许导入的模块列表
 list__allowed_modules = {
-    # 数据处理
-    "math",  # 数学运算 (sqrt, sin, cos等)
-    "random",  # 随机数 (采样、打乱)
-    "json",  # JSON解析 (处理API响应、配置)
-    # 文本处理
-    "re",  # 正则表达式 (提取、替换)
-    "string",  # 字符串常量与工具
-    # 路径操作
-    "pathlib",  # 现代路径处理 (Path对象)
-    "os.path",  # 路径拼接、判断 (比os安全)
-    # 数据结构
-    "collections",  # defaultdict, Counter等
-    "itertools",  # 迭代器工具 (组合、排列)
-    "functools",  # 函数工具 (lru_cache等)
-    # 时间日期
-    "datetime",  # 时间戳, 格式化
-    # 科学计算
-    "numpy",  # 数组操作图像数据是 numpy 数组
-    "torch",
-    # 哈希与编码
-    "hashlib",  # MD5, SHA256 (生成文件名)
-    "base64",  # 编解码 (处理嵌入数据)
-    # 统计与算法
-    "statistics",  # 均值、中位数等统计
-    "bisect",  # 二分查找 (排序列表)
-    "heapq",  # 堆队列 (优先级队列)
-    # 类型与反射
-    "typing",  # 类型提示 (静态检查)
-    "inspect",  # 查看对象信息 (高级调试)
-    # 数学扩展
-    "decimal",  # 高精度浮点 (避免精度误差)
+    # 数值与数学
+    "math",  # 数学运算
+    "random",  # 随机数
+    "cmath",
+    "decimal",  # 高精度浮点
     "fractions",  # 有理数运算
-    # 额外的包
-    "PIL",  # 这个包停止维护了
-    "Pillow",
+    "numbers",
+    "statistics",  # 均值, 中位数等统计
+    "bisect",  # 二分查找
+    "heapq",  # 堆队列
+    # 文本处理
+    "re",  # 正则表达式
+    "string",  # 字符串常量与工具
+    "json",  # JSON解析 (处理API响应, 配置)
+    "csv",
+    "html",
+    "tomllib",  # TOML 解析
+    "base64",  # 编解码
+    "difflib",
+    "textwrap",
+    # 路径操作
+    "pathlib",  # 现代路径处理
+    "os.path",  # 路径拼接, 判断
+    # 语言拓展
+    "ast",  # 抽象语法树
+    "collections",  # defaultdict, Counter等
+    "itertools",  # 迭代器工具
+    "functools",  # 函数工具
+    "enum",
+    "dataclasses",
+    "typing",  # 类型提示
+    "inspect",  # 查看对象信息
+    # 时间日期
+    "time",
+    "datetime",  # 时间戳, 格式化
+    "zoneinfo",
+    # 科学计算与机器学习等
+    "sklearn",
+    "pandas",
+    "numpy",
+    "torch",
+    "torchvision",
+    "torchaudio",
+    "torchtext",
+    "scipy",
+    # 哈希与加密
+    "hashlib",
+    "secrets",
+    "hmac",
+    # 图像与视觉
+    "PIL",
+    # "Pillow", # 注意 Pillow 包仍然用的是 PIL
     "imageio",
     "skimage",
     "colorsys",
-    "dataclasses",
+    # 其它工具
     "uuid",
-    "csv",
-    "tomllib",
-    "html",
     "ipaddress",
-    "textwrap",
-    "difflib",
-    "enum",
-    "numbers",
-    "scipy",
-    "cmath",
 }
 
 # 定义需要禁用的危险内置函数
@@ -86,22 +94,44 @@ builtins__unsafe = {
 }
 
 
+# 检查包是否允许. 包的所有子包都视为允许
+def check_is_allowed(_name: str) -> bool:
+    parts__target = _name.split(".")
+    # 遍历所有项比较
+    for allowed in list__allowed_modules:
+        parts__allowed = allowed.split(".")
+        # 必须长度>=父级, 且对应层级完全一致
+        if (
+            # 先判断层级数
+            len(parts__target) >= len(parts__allowed)
+            # 裁剪后比较是否相等
+            and parts__target[: len(parts__allowed)] == parts__allowed
+        ):
+            return True
+    return False
+
+
 # 安全包装导入函数
 def strict_allowed_import(name, globals=None, locals=None, fromlist=(), level=0):
     """import module only if it's in the allowed list"""
     # 只允许精确匹配 (不支持模糊匹配)
-    if name not in list__allowed_modules:
+    # if name not in list__allowed_modules:
+    #     raise ImportError(f"<dynamic> prohibited module: {name}")
+    # 允许放行子模块
+    if not check_is_allowed(name):
         raise ImportError(f"<dynamic> prohibited module: {name}")
 
+    import_func__original = builtins.__import__
     # 执行导入
-    module = importlib.import_module(name)
+    # module = importlib.import_module(name)
+    module = import_func__original(name, globals, locals, fromlist, level)
 
     # 删除父模块缓存 (防止通过 sys.modules 泄露)
-    parts = name.split(".")
-    for i in range(len(parts) - 1, 0, -1):  # 从父模块开始删
-        parent = ".".join(parts[:i])
-        if parent not in list__allowed_modules:
-            sys.modules.pop(parent, None)
+    # parts = name.split(".")
+    # for i in range(len(parts) - 1, 0, -1):  # 从父模块开始删
+    #     parent = ".".join(parts[:i])
+    #     if parent not in list__allowed_modules:
+    #         sys.modules.pop(parent, None)
 
     return module
 
@@ -199,6 +229,11 @@ class DynamicScriptNode:
             },
         }
 
+    # 总是刷新 (float("NaN") 不等于任何值, 也不等于自身)
+    @classmethod
+    def IS_CHANGED(cls):
+        return float("NaN")
+
     def main(
         self,
         input_ports_count,
@@ -274,16 +309,3 @@ class DynamicScriptNode:
                 context__exception,
                 *outputs,
             )
-
-    # @staticmethod
-    # def check_imports_static(code, allowed_modules):
-    #     """check imports in the code using AST"""
-    #     tree = ast.parse(code)
-    #     for node in ast.walk(tree):
-    #         if isinstance(node, (ast.Import, ast.ImportFrom)):
-    #             for alias in node.names:
-    #                 module_name = (
-    #                     alias.name if isinstance(node, ast.Import) else node.module
-    #                 )
-    #                 if module_name not in allowed_modules:
-    #                     raise ImportError(f"<dynamic> prohibited module: {module_name}")

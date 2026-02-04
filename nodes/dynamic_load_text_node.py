@@ -1,4 +1,6 @@
 import encodings
+import hashlib
+import time
 
 from ..core.utils import get_category
 from ..core.utils import read_file_safe
@@ -19,6 +21,7 @@ class DynamicLoadTextFileNode:
     RETURN_TYPES = ("STRING", "*")
     RETURN_NAMES = ("content", "exception")
 
+    # @classmethod 注解会使函数成为类方法, 第一个参数为类本身 (注意不是实例)
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -37,6 +40,19 @@ class DynamicLoadTextFileNode:
                 ),
             },
         }
+
+    @classmethod
+    def IS_CHANGED(cls, file_path, encoding):
+        try:
+            content, _ = read_file_safe(
+                file_path, "all", encoding, list__text_encodings
+            )
+            if content is None:  # read_file_safe 可能返回 None
+                return f"ERROR_{time.time()}"
+            # 使用 MD5 算法, 速度快, 此处对安全性不敏感
+            return hashlib.md5(content.encode()).hexdigest()
+        except Exception:
+            return f"ERROR_{time.time()}"
 
     def main(self, file_path, encoding, **kwargs):
         # 调用函数读取内容

@@ -165,7 +165,7 @@ def read_file_safe(
         fallback_encodings: 备用编码列表
 
     Returns:
-        文件内容或 None
+        TextFileResult
     """
     path = Path(_path__file)
 

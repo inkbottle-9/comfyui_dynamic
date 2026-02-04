@@ -17,7 +17,7 @@ function object_to_map_safe(obj) {
         const key__int = Number(key); // 或 parseInt(key, 10)
         const value__int = Number(value);
 
-        // 严格验证（拒绝 NaN、Infinity 等）
+        // 严格验证 (拒绝 NaN, Infinity 等)
         if (Number.isInteger(key__int) && Number.isInteger(value__int)) {
             map.set(key__int, value__int);
         } else {
