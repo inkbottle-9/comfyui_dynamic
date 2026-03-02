@@ -88,6 +88,7 @@
     "bisect",
     "heapq",
     "re",
+    "regex",
     "string",
     "json",
     "csv",

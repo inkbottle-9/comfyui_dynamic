@@ -42,7 +42,7 @@ class DynamicLoadTextFileNode:
         }
 
     @classmethod
-    def IS_CHANGED(cls, file_path, encoding):
+    def IS_CHANGED(cls, file_path, encoding, **kwargs):
         try:
             content, _ = read_file_safe(
                 file_path, "all", encoding, list__text_encodings

@@ -2,7 +2,7 @@ import sys
 import traceback
 
 # import ast
-import importlib
+# import importlib
 import builtins
 
 from ..core.utils import get_category
@@ -28,6 +28,7 @@ list__allowed_modules = {
     "heapq",  # 堆队列
     # 文本处理
     "re",  # 正则表达式
+    "regex",  # 正则表达式
     "string",  # 字符串常量与工具
     "json",  # JSON解析 (处理API响应, 配置)
     "csv",
@@ -85,12 +86,33 @@ builtins__unsafe = {
     # 文件 / 系统操作类
     "open",
     "input",
+    "dir",
     # 交互式命令
     "exit",
     "quit",
     "help",
-    # __import__ 会被自己覆盖, 所以先去掉
+    # 反射与属性访问
+    "vars",
+    "globals",
+    "locals",
+    "getattr",
+    "setattr",
+    "delattr",
+    # 内存操作
+    "id",
+    # __import__ 会被覆盖, 所以先去掉
     "__import__",
+}
+
+# 安全的内部函数
+builtins__safe_internal = {
+    "__build_class__",  # 类定义必需
+    "__debug__",  # 调试标志
+    "__doc__",  # 文档
+    "__name__",  # 模块名
+    "__package__",  # 包名
+    "__spec__",  # 模块规格
+    "__annotations__",  # 类型注解
 }
 
 
@@ -230,8 +252,9 @@ class DynamicScriptNode:
         }
 
     # 总是刷新 (float("NaN") 不等于任何值, 也不等于自身)
+    # 该函数应该接收和主函数相同的参数, 这里用 **kwargs 接收所有参数
     @classmethod
-    def IS_CHANGED(cls):
+    def IS_CHANGED(cls, **kwargs):
         return float("NaN")
 
     def main(
@@ -259,11 +282,25 @@ class DynamicScriptNode:
             builtins__final = __builtins__
         else:
             # 自动获取所有非下划线开头的内置函数
-            builtins__final = {
-                name: obj
-                for name, obj in builtins.__dict__.items()
-                if not name.startswith("_") and name not in builtins__unsafe
-            }
+            # builtins__final = {
+            #     name: obj
+            #     for name, obj in builtins.__dict__.items()
+            #     if not name.startswith("_") and name not in builtins__unsafe
+            # }
+            builtins__final = {}
+            for name, obj in builtins.__dict__.items():
+                # 跳过黑名单中的函数
+                if name in builtins__unsafe:
+                    continue
+                else:
+                    builtins__final[name] = obj
+                # # 允许非下划线开头的
+                # if not name.startswith("_"):
+                #     builtins__final[name] = obj
+                # 明确允许的内部函数
+                # elif name in builtins__safe_internal:
+                #     builtins__final[name] = obj
+
             # 注入自定义的 import 钩子 (用于限制可导入的包)
             builtins__final["__import__"] = strict_allowed_import
 
