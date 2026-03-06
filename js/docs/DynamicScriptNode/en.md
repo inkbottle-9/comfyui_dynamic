@@ -127,5 +127,6 @@
     "colorsys",
     "uuid",
     "ipaddress",
+    "copy",
     ```
 

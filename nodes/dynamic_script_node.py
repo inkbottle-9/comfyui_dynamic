@@ -75,6 +75,7 @@ list__allowed_modules = {
     # 其它工具
     "uuid",
     "ipaddress",
+    "copy",
 }
 
 # 定义需要禁用的危险内置函数
