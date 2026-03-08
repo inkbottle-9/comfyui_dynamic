@@ -67,6 +67,7 @@ list__allowed_modules = {
     "secrets",
     "hmac",
     # 图像与视觉
+    "cv2",
     "PIL",
     # "Pillow", # 注意 Pillow 包仍然用的是 PIL
     "imageio",

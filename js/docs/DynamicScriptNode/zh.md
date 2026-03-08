@@ -123,6 +123,7 @@
     "hashlib",
     "secrets",
     "hmac",
+    "cv2",
     "PIL",
     "imageio",
     "skimage",
