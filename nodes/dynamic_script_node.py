@@ -332,9 +332,11 @@ class DynamicScriptNode:
             )
 
             message__to_log = f"<dynamic> script execution error\n"
+            print("\n" + "=" * 80)
             print(message__to_log)  # 打印到控制台 (日志)
             for line in lines__traceback:
                 print(line, end="")
+            print("=" * 80 + "\n")
 
             context__exception = (
                 type__exception,
