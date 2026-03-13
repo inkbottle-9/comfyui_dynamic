@@ -97,8 +97,8 @@ builtins__unsafe = {
     "vars",
     "globals",
     "locals",
-    "getattr",
-    "setattr",
+    # "getattr",
+    # "setattr",
     "delattr",
     # 内存操作
     "id",
