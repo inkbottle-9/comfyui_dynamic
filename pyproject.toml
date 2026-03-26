@@ -1,6 +1,6 @@
 [project]
 name = "comfyui_dynamic"
-description = "Adds a full-featured Python script node to ComfyUI"
+description = "Adds nodes for Python script execution to ComfyUI."
 version = "v0.0.0"
 license = { file = "LICENSE.md" }
 dependencies = []
