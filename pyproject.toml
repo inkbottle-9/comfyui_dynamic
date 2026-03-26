@@ -13,6 +13,6 @@ Documentation = "https://github.com/inkbottle-9/comfyui_dynamic/wiki"
 
 [tool.comfy]
 PublisherId = "inkbottle-9"
-DisplayName = "comfyui_dynamic"
-Icon = "https://github.com/inkbottle-9/comfyui_dynamic/tree/main/icon/logo__comfy_dynamic.png"
-Banner = "https://github.com/inkbottle-9/comfyui_dynamic/tree/main/icon/logo__comfy_dynamic__banner.png"
+DisplayName = "Dynamic Python Script Executor (interpreter)"
+Icon = "https://raw.githubusercontent.com/inkbottle-9/comfyui_dynamic/refs/heads/main/icon/logo__comfy_dynamic.png"
+Banner = "https://raw.githubusercontent.com/inkbottle-9/comfyui_dynamic/refs/heads/main/icon/logo__comfy_dynamic__banner.png"
