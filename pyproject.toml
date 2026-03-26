@@ -4,9 +4,7 @@ description = "Adds nodes for Python script execution to ComfyUI."
 version = "v0.0.0"
 license = { file = "LICENSE.md" }
 dependencies = []
-classifiers = [
-    "Operating System :: OS Independent"
-]
+classifiers = ["Operating System :: OS Independent"]
 
 [project.urls]
 Repository = "https://github.com/inkbottle-9/comfyui_dynamic"
