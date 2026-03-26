@@ -1,6 +1,8 @@
 
 # comfyui_dynamic
 
+![banner](icon/logo__comfy_dynamic__banner.png)
+
 [简体中文](./documents/README__zh_CN.md)
 
 
