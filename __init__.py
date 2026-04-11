@@ -2,6 +2,9 @@ from .core.utils import get_category
 
 from .nodes.dynamic_script_node import DynamicScriptNode
 from .nodes.dynamic_load_text_node import DynamicLoadTextFileNode
+from .nodes.dynamic_switch_any_node import DynamicSwitchAnyNode
+from .nodes.dynamic_none_node import DynamicNoneNode
+
 
 
 # class DynamicTestNode:
@@ -33,6 +36,8 @@ NODE_CLASS_MAPPINGS = {
     # DynamicTestNode.__name__: DynamicTestNode,
     DynamicLoadTextFileNode.__name__: DynamicLoadTextFileNode,
     DynamicScriptNode.__name__: DynamicScriptNode,
+    DynamicSwitchAnyNode.__name__: DynamicSwitchAnyNode,
+    DynamicNoneNode.__name__: DynamicNoneNode,
 }
 
 # 显示名称
@@ -40,6 +45,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     # DynamicTestNode.__name__: DynamicTestNode.NAME,
     DynamicLoadTextFileNode.__name__: DynamicLoadTextFileNode.NAME,
     DynamicScriptNode.__name__: DynamicScriptNode.NAME,
+    DynamicSwitchAnyNode.__name__: DynamicSwitchAnyNode.NAME,
+    DynamicNoneNode.__name__: DynamicNoneNode.NAME,
 }
 
 # JS 脚本目录

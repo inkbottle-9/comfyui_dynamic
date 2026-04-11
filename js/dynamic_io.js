@@ -8,7 +8,7 @@ const max__dynamic_ports = 100;
 
 // 注册扩展以修改节点行为
 app.registerExtension({
-    name: "dynamic.dynamic_io",
+    name: "dynamic.dynamic_io__origin",
 
     // async nodeCreated(node) {
 
@@ -27,6 +27,9 @@ app.registerExtension({
     // },
 
     async beforeRegisterNodeDef(type__node, data__node, app) {
+        // 禁用此功能
+        return;
+
         // console.log("<dynamic> checking node:", data__node.name);
 
         // 用于测试, 仅对特定节点启用
@@ -72,8 +75,9 @@ function check_meta(meta) {
             meta.dynamic_io.flag__dynamic_inputs
             || meta.dynamic_io.flag__dynamic_outputs
         )
-        && meta.dynamic_io.name__dynamic_inputs_widget
-        && meta.dynamic_io.name__dynamic_outputs_widget;
+        // 若动态输入输出端口, 则必须指定控件名称
+        && (!meta.dynamic_io.flag__dynamic_inputs || meta.dynamic_io.name__dynamic_inputs_widget)
+        && (!meta.dynamic_io.flag__dynamic_outputs || meta.dynamic_io.name__dynamic_outputs_widget);
 }
 
 // 实现功能的主函数
@@ -86,6 +90,8 @@ function process(node, meta) {
     const count__fixed_outputs = meta.dynamic_io.count__fixed_outputs || 0;
     const name__dynamic_inputs_widget = meta.dynamic_io.name__dynamic_inputs_widget;
     const name__dynamic_outputs_widget = meta.dynamic_io.name__dynamic_outputs_widget;
+    const prefix__dynamic_inputs = meta.dynamic_io.prefix__dynamic_inputs || "input_";
+    const prefix__dynamic_outputs = meta.dynamic_io.prefix__dynamic_outputs || "output_";
 
     if (flag__dynamic_inputs) {
         // 处理动态输入端口
@@ -112,7 +118,7 @@ function process(node, meta) {
                     // 第一次赋值或值真正改变时重建端口
                     if (!flag__has_rebuilt) {
                         flag__has_rebuilt = true;
-                        update_input_ports(node, count__fixed_inputs, value__new);
+                        update_input_ports(node, count__fixed_inputs, value__new, prefix__dynamic_inputs);
                     }
                     // 保存新值
                     value__input_ports_count = value__new;
@@ -135,12 +141,12 @@ function process(node, meta) {
                 // 确保端口重建
                 if (this.node) {
                     // 调用节点的方法更新端口, 并更新控件的值
-                    this.value = update_input_ports(this.node, count__fixed_inputs, value);
+                    this.value = update_input_ports(this.node, count__fixed_inputs, value, prefix__dynamic_inputs);
                 }
             };
 
             // 初始化时调用一次以设置正确的端口数量
-            update_input_ports(node, count__fixed_inputs, widget__input_ports_count.value);
+            update_input_ports(node, count__fixed_inputs, widget__input_ports_count.value, prefix__dynamic_inputs);
         }
     }
 
@@ -168,7 +174,7 @@ function process(node, meta) {
                     // 第一次赋值或值真正改变时重建端口
                     if (!flag__has_rebuilt) {
                         flag__has_rebuilt = true;
-                        update_output_ports(node, count__fixed_outputs, value__new);
+                        update_output_ports(node, count__fixed_outputs, value__new, prefix__dynamic_outputs);
                     }
                     // 保存新值
                     value__output_ports_count = value__new;
@@ -189,19 +195,19 @@ function process(node, meta) {
                 // 确保端口重建 (理论上 setter 已处理, 这里做双重保险)
                 if (this.node) {
                     // 调用节点的方法更新端口, 并更新控件的值
-                    this.value = update_output_ports(this.node, count__fixed_outputs, value);
+                    this.value = update_output_ports(this.node, count__fixed_outputs, value, prefix__dynamic_outputs);
                 }
             };
 
             // 初始化时调用一次以设置正确的端口数量
-            update_output_ports(node, count__fixed_outputs, widget__output_ports_count.value);
+            update_output_ports(node, count__fixed_outputs, widget__output_ports_count.value, prefix__dynamic_outputs);
         }
     }
 };
 
 // 动态更新输入端口的方法, 返回操作结束后的动态端口的最终数量
 // type__node.prototype.update_input_ports =
-function update_input_ports(node, count__fixed, count__target) {
+function update_input_ports(node, count__fixed, count__target, prefix__dynamic_inputs = "input_") {
     try {
         // console.log("更新端口数量:", count__target);
 
@@ -214,7 +220,7 @@ function update_input_ports(node, count__fixed, count__target) {
 
         // 添加端口
         for (let i = count__current; i < target; i++) {
-            const name = `input_${i}`;
+            const name = `${prefix__dynamic_inputs}${i}`;
             // console.log("添加:", name);
             node.addInput(name, "*");
             count__current++;
@@ -244,7 +250,7 @@ function update_input_ports(node, count__fixed, count__target) {
 };
 
 // type__node.prototype.update_output_ports =
-function update_output_ports(node, count__fixed, count__target) {
+function update_output_ports(node, count__fixed, count__target, prefix__dynamic_outputs = "output_") {
     try {
         // console.log("更新输出端口数量:", count__target);
         count__target = Math.max(0, Math.min(max__dynamic_ports, Math.floor(count__target)));
@@ -255,7 +261,7 @@ function update_output_ports(node, count__fixed, count__target) {
 
         // 添加端口
         for (let i = count__current; i < target; i++) {
-            const name = `output_${i}`;
+            const name = `${prefix__dynamic_outputs}${i}`;
             // console.log("添加输出:", name);
             node.addOutput(name, "*");
             count__current++;

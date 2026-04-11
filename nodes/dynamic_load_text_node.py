@@ -5,6 +5,7 @@ import time
 from ..core.utils import get_category
 from ..core.utils import read_file_safe
 from ..core.utils import check_is_text_encoding
+from ..core.utils import get_node_name
 
 
 list__all_encodings = sorted(set(encodings.aliases.aliases.values()))
@@ -15,11 +16,15 @@ list__text_encodings = [
 
 # 动态读取文本文件节点
 class DynamicLoadTextFileNode:
-    NAME = "DynamicLoadTextFileNode"
+    NAME = get_node_name("load_text_file ")
     CATEGORY = get_category("script")
     FUNCTION = "main"
     RETURN_TYPES = ("STRING", "*")
     RETURN_NAMES = ("content", "exception")
+    OUTPUT_TOOLTIPS = (
+        "The content of the file.",
+        "Exception information or None.",
+    )
 
     # @classmethod 注解会使函数成为类方法, 第一个参数为类本身 (注意不是实例)
     @classmethod
@@ -31,12 +36,16 @@ class DynamicLoadTextFileNode:
                     {
                         "placeholder": "file full path (e.g. E:/dir/script.py)",
                         "multiline": False,
+                        "tooltip": "The full path to the text file to load. (e.g. E:/dir/script.py)",
                     },
                 ),
                 "encoding": (
                     # 获取所有编码类型
                     list__text_encodings,
-                    {"default": "utf_8"},
+                    {
+                        "default": "utf_8",
+                        "tooltip": "The encoding to use for reading the file.",
+                    },
                 ),
             },
         }

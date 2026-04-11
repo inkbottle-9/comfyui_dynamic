@@ -10,6 +10,8 @@ from typing import Optional, List, Union, NamedTuple
 # 插件空间
 namespace = "dynamic"
 
+node_prefix = "dynamic_"
+
 # 把当前进程里所有后续出现的警告 (Warning) 的过滤级别强制设为始终显示
 warnings.simplefilter("always")
 
@@ -36,7 +38,7 @@ def get_category(string__category: str) -> str:
 
 # 获取节点全名
 def get_node_name(string__name: str) -> str:
-    return f"{namespace}.{string__name}"
+    return f"{node_prefix}{string__name}"
 
 
 # 为字符串追加标签
@@ -116,6 +118,67 @@ class FlexibleOptionalInputType(dict):
     def __contains__(self, key):
         """Always contain a key, and we'll always return the tuple above when asked for it."""
         return True
+
+
+class FlexibleOptionalInputTypeLazy(dict):
+    """支持 lazy 执行的 FlexibleOptionalInputType"""
+
+    # tooltip 参数实际上不生效
+    def __init__(
+        self,
+        type,
+        data: Optional[dict] = None,
+        lazy: bool = True,
+        tooltip: Optional[str] = None,
+    ):
+        self.type = type
+        self.data = data
+        self.lazy = lazy
+        self.tooltip = tooltip
+        self._keys__accessed = set()  # 追踪访问
+        if self.data is not None:
+            for k, v in self.data.items():
+                self[k] = v
+
+    def __getitem__(self, key):
+        # print("#" * 80)
+        # print(f"[__getitem__] key: {key}")
+        
+        self._keys__accessed.add(key)  # 记录访问
+
+        if self.data is not None and key in self.data:
+            return self.data[key]
+        dict_item = {}
+        # 添加 lazy 标记
+        if self.lazy:
+            # print("#" * 80)
+            # print(self.lazy)
+            dict_item["lazy"] = True
+        # 添加工具提示
+        if self.tooltip is not None:
+            # print("#" * 80)
+            # print(self.tooltip)
+            dict_item["tooltip"] = self.tooltip
+        # 如果没有特殊设置, 直接返回类型; 否则返回一个包含类型和设置的字典
+        if dict_item:
+            return (self.type, dict_item)
+        else:
+            return (self.type,)
+
+    def __contains__(self, key):
+        # print("#" * 80)
+        # print(f"[__contains__] key: {key}")
+        return True
+    
+    def __iter__(self):
+        # print("#" * 80)
+        # print(f"[__iter__] data keys: {list(self.data.keys()) if self.data else None}")
+        return super().__iter__()
+    
+    def items(self):
+        # print("#" * 80)
+        # print(f"[items] _keys__accessed: {self._keys__accessed}")
+        return super().items()
 
 
 class ByPassTypeTuple(tuple):

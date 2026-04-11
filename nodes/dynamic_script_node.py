@@ -11,8 +11,9 @@ from ..core.utils import get_category
 from ..core.utils import append_tags
 
 from ..core.utils import any_type
-from ..core.utils import FlexibleOptionalInputType
+from ..core.utils import FlexibleOptionalInputTypeLazy
 from ..core.utils import ByPassTypeTuple
+from ..core.utils import get_node_name
 
 # 允许导入的模块列表
 list__allowed_modules = {
@@ -163,7 +164,14 @@ def strict_allowed_import(name, globals=None, locals=None, fromlist=(), level=0)
 # 动态脚本节点
 class DynamicScriptNode:
     # 节点名称
-    NAME = append_tags("DynamicScriptNode ", ["python", "script"])
+    NAME = append_tags(
+        get_node_name("script "),
+        [
+            "python",
+            "executor",
+            "code",
+        ],
+    )
     # 节点分类
     CATEGORY = get_category("script")
     # 函数名
@@ -173,6 +181,8 @@ class DynamicScriptNode:
     RETURN_TYPES = ByPassTypeTuple(("*",))
     # 返回端口名称
     RETURN_NAMES = ByPassTypeTuple(("exception",))
+    # 返回端口工具提示
+    OUTPUT_TOOLTIPS = ("Exception information or None.",)
 
     # 输入类型 (默认状态下)
     @classmethod
@@ -186,7 +196,7 @@ class DynamicScriptNode:
                         "min": 0,
                         "max": 100,
                         "step": 1,
-                        "tooltip": "The number of input ports for this node",
+                        "tooltip": "The number of input ports for this node.",
                     },
                 ),
                 "output_ports_count": (
@@ -196,23 +206,31 @@ class DynamicScriptNode:
                         "min": 0,
                         "max": 100,
                         "step": 1,
-                        "tooltip": "The number of output ports for this node",
+                        "tooltip": "The number of output ports for this node.",
                     },
                 ),
                 "remove_import_restrictions": (
                     "BOOLEAN",
                     {
                         "default": False,
-                        "tooltip": "allow importing any module (use with caution, check the code first !!!!!)",
+                        "tooltip": "Allow importing any module. (use with caution, check the code first !!!)",
                     },
                 ),
                 "code": (
                     "STRING",
-                    {"placeholder": "code here... (with python)", "multiline": True},
+                    {
+                        "placeholder": "code here... (with python. inputs/outputs are built-in list variables to access dynamic ports)",
+                        "multiline": True,
+                    },
                 ),
             },
             # 动态生成的输入会放在这里
-            "optional": FlexibleOptionalInputType(any_type),
+            "optional": FlexibleOptionalInputTypeLazy(
+                any_type,
+                None,
+                False,
+                "Dynamic inputs (input_0, input_1, ...).",
+            ),
             "hidden": {
                 "unique_id": "UNIQUE_ID",
                 "extra_pnginfo": "EXTRA_PNGINFO",
@@ -231,6 +249,8 @@ class DynamicScriptNode:
                     "count__fixed_outputs": 1,
                     "name__dynamic_inputs_widget": "input_ports_count",
                     "name__dynamic_outputs_widget": "output_ports_count",
+                    "prefix__dynamic_inputs": "input_",
+                    "prefix__dynamic_outputs": "output_",
                 },
                 "warning": {
                     # 需要判断状态的控件名称
