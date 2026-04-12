@@ -1,5 +1,9 @@
 import { app } from "../../scripts/app.js";
 
+
+// 修复了断线和刷新问题, 但新建节点 count 值错误设置为 -1
+
+
 const max__dynamic_ports = 100;
 
 app.registerExtension({
@@ -7,7 +11,7 @@ app.registerExtension({
 
     async beforeRegisterNodeDef(type__node, data__node, app) {
 
-        // return;
+        return;
 
         const meta = data__node.input.meta__dynamic;
         if (!check_meta(meta)) return;
