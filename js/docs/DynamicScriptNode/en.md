@@ -117,6 +117,7 @@
     "torchvision",
     "torchaudio",
     "torchtext",
+    "timm",
     "scipy",
     "hashlib",
     "secrets",

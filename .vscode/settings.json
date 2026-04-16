@@ -1,14 +1,35 @@
 {
     "cSpell.words": [
         "bgcolor",
+        "cmath",
+        "colorsys",
         "comfyui",
+        "dataclasses",
+        "difflib",
         "dynprompt",
         "fromlist",
+        "functools",
+        "hashlib",
+        "heapq",
+        "hmac",
+        "imageio",
         "inkbottle",
+        "itertools",
         "kimi",
+        "numpy",
+        "pathlib",
         "pnginfo",
         "pycache",
         "rgthree",
-        "skimage"
+        "scipy",
+        "skimage",
+        "sklearn",
+        "textwrap",
+        "timm",
+        "tomllib",
+        "torchaudio",
+        "torchtext",
+        "torchvision",
+        "zoneinfo"
     ]
 }

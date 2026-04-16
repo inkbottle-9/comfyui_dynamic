@@ -62,6 +62,7 @@ list__allowed_modules = {
     "torchvision",
     "torchaudio",
     "torchtext",
+    "timm",
     "scipy",
     # 哈希与加密
     "hashlib",
