@@ -8,7 +8,7 @@
 
 ## 1. abstract
 
-- Adds a full-featured (maybe not that full) Python script node to ComfyUI
+- Adds a full-featured Python script execution node and some quality-of-life nodes to ComfyUI
 - Plugin directory = `/comfyui_dynamic`
 - **LICENSE** = `GNU Lesser General Public License v3.0`
 

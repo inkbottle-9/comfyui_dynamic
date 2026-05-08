@@ -1,7 +1,7 @@
 [project]
 name = "comfyui_dynamic"
-description = "Adds nodes for Python script execution to ComfyUI."
-version = "v0.0.0"
+description = "Adds Python script execution and quality-of-life nodes to ComfyUI."
+version = "v0.0.1"
 license = { file = "LICENSE.md" }
 dependencies = []
 classifiers = ["Operating System :: OS Independent"]
