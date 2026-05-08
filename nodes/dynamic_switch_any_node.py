@@ -13,7 +13,7 @@ class DynamicSwitchAnyNode:
     # 节点名称
     NAME = append_tags(get_node_name("switch_any "), ["branch", "case", "select"])
     # 节点分类
-    CATEGORY = get_category("script")
+    CATEGORY = get_category("utils")
     # 函数名
     FUNCTION = "main"
 
@@ -24,6 +24,12 @@ class DynamicSwitchAnyNode:
     # 返回端口工具提示
     OUTPUT_TOOLTIPS = ("The value of the case at the specified index.",)
 
+    DESCRIPTION = (
+        "This node is used to switch between multiple cases by index. "
+        "It accepts an index as input and returns the value of the case at that index, "
+        "or returns the default value (specified or None) if out of range."
+    )
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -32,6 +38,8 @@ class DynamicSwitchAnyNode:
                     "INT",
                     {
                         "default": 0,
+                        "min": -1,
+                        "max": 100,
                         "step": 1,
                         "tooltip": "The index of the case to return. Must be between 0 and cases_count - 1, else the default value will be returned.",
                     },
@@ -107,7 +115,7 @@ class DynamicSwitchAnyNode:
             # index 超出范围时, 需要执行 default 输入
             needed.append("default")
 
-        # 其他输入不需要执行，不加入 needed 列表
+        # 其他输入不需要执行,不加入 needed 列表
         return needed
 
     def main(

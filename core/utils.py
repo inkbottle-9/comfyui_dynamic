@@ -1,4 +1,5 @@
 # utils.py
+import random
 import warnings
 import codecs
 
@@ -33,6 +34,9 @@ def deprecated(func):
 
 # 获取分类路径
 def get_category(string__category: str) -> str:
+    """获取分类路径"""
+    if not string__category:
+        return namespace
     return f"{namespace}/{string__category}"
 
 
@@ -59,8 +63,6 @@ def append_tags(
 def get_dynamic_inputs(num):
     inputs = {}
     for i in range(num):
-        # a,b,c…
-        # ch = chr(ord("a") + i)
         ch = f"port__{i}"
         # forceInput 允许再接线
         inputs[ch] = ("*", {"forceInput": True})
@@ -143,7 +145,7 @@ class FlexibleOptionalInputTypeLazy(dict):
     def __getitem__(self, key):
         # print("#" * 80)
         # print(f"[__getitem__] key: {key}")
-        
+
         self._keys__accessed.add(key)  # 记录访问
 
         if self.data is not None and key in self.data:
@@ -169,12 +171,12 @@ class FlexibleOptionalInputTypeLazy(dict):
         # print("#" * 80)
         # print(f"[__contains__] key: {key}")
         return True
-    
+
     def __iter__(self):
         # print("#" * 80)
         # print(f"[__iter__] data keys: {list(self.data.keys()) if self.data else None}")
         return super().__iter__()
-    
+
     def items(self):
         # print("#" * 80)
         # print(f"[items] _keys__accessed: {self._keys__accessed}")
@@ -267,3 +269,10 @@ def read_file_safe(
         except Exception as exception:
             return (None, exception)
     return (None, Exception(f"All encoding attempts failed: {list__encodings}"))
+
+
+def generate_random(_min: int, _max: int):
+    """生成随机整数"""
+    if _min > _max:
+        _min, _max = _max, _min  # 交换, 确保 a <= b
+    return random.randint(_min, _max)

@@ -21,14 +21,14 @@ app.registerExtension({
         const on_node_created__origin = type__node.prototype.onNodeCreated;
         const configure_origin = type__node.prototype.configure;
 
-        // 拦截 configure（工作流恢复后调用）
+        // 拦截 configure (工作流恢复后调用)
         type__node.prototype.configure = function (config) {
             console.log(`<dynamic_io> configure: ${this.type} (ID: ${this.id})`);
 
-            // 先执行原始 configure（恢复 widget 值和端口）
+            // 先执行原始 configure (恢复 widget 值和端口)
             const result = configure_origin?.apply(this, arguments);
 
-            // configure 完成后，同步端口（关键：此时工作流值已就绪）
+            // configure 完成后,同步端口 (关键: 此时工作流值已就绪)
             if (this._dynamic_io_setup) {
                 syncDynamicPorts(this, meta);
             }
@@ -41,7 +41,7 @@ app.registerExtension({
 
             const result = on_node_created__origin?.apply(this, arguments);
 
-            // 初始化动态 IO（劫持 setter，但不强制重建端口）
+            // 初始化动态 IO (劫持 setter,但不强制重建端口)
             setupDynamicIO(this, meta);
             this._dynamic_io_setup = true;
 
@@ -82,7 +82,7 @@ function setupWidget(node, count__fixed, widget_name, prefix, type) {
     widget._dynamic_io_hooked = true;
     console.log(`<dynamic_io> Setup ${type} widget "${widget_name}"`);
 
-    // 闭包变量：跟踪当前应有的端口数
+    // 闭包变量: 跟踪当前应有的端口数
     let current_target = -1; // 初始 -1 确保首次赋值触发 setter
 
     // 劫持 widget.value
@@ -102,7 +102,7 @@ function setupWidget(node, count__fixed, widget_name, prefix, type) {
                 const update_fn = type === 'input' ? update_input_ports : update_output_ports;
                 const actual = update_fn(node, count__fixed, num_value, prefix, widget_name);
 
-                // 如果因连接锁定，同步实际值
+                // 如果因连接锁定,同步实际值
                 if (actual !== num_value) {
                     console.log(`<dynamic_io> ${type} locked at ${actual}`);
                     current_target = actual;
@@ -113,7 +113,7 @@ function setupWidget(node, count__fixed, widget_name, prefix, type) {
         enumerable: true
     });
 
-    // 绑定 callback（用户手动调整时）
+    // 绑定 callback (用户手动调整时)
     const widget_callback__origin = widget.callback;
     widget.callback = function (value) {
         console.log(`<dynamic_io> ${type} callback: ${value}`);
@@ -125,7 +125,7 @@ function setupWidget(node, count__fixed, widget_name, prefix, type) {
     };
 }
 
-// 同步端口：configure 完成后调用，确保工作流值与实际端口一致
+// 同步端口: configure 完成后调用,确保工作流值与实际端口一致
 function syncDynamicPorts(node, meta) {
     console.log(`<dynamic_io> Syncing ports for node ${node.id}`);
 
@@ -146,23 +146,23 @@ function syncDynamicPorts(node, meta) {
 
             console.log(`<dynamic_io> Input check: workflow=${workflow_value}, actual=${actual_dynamic}`);
 
-            // 关键：只有当实际端口数与工作流值不符时，才触发 setter 重建
+            // 关键: 只有当实际端口数与工作流值不符时,才触发 setter 重建
             if (actual_dynamic !== workflow_value) {
                 console.log(`<dynamic_io> Mismatch! Rebuilding inputs to ${workflow_value}`);
                 widget.value = workflow_value;
             } else {
                 console.log(`<dynamic_io> Input count matches, no rebuild needed`);
-                // 静默更新内部值，避免后续误触发
+                // 静默更新内部值,避免后续误触发
                 const descriptor = Object.getOwnPropertyDescriptor(widget, 'value');
                 if (descriptor) {
-                    // 直接修改 current_target（通过重新调用 setter 会递归，所以直接赋值）
-                    // 实际上不需要操作，因为值已经正确
+                    // 直接修改 current_target (通过重新调用 setter 会递归,所以直接赋值)
+                    // 实际上不需要操作,因为值已经正确
                 }
             }
         }
     }
 
-    // 同步输出端口（类似逻辑）
+    // 同步输出端口 (类似逻辑)
     if (flag__dynamic_outputs) {
         const widget = node.widgets?.find(w => w.name === name__dynamic_outputs_widget);
         if (widget) {
@@ -182,7 +182,7 @@ function syncDynamicPorts(node, meta) {
     }
 }
 
-// 更新输入端口（带连接保护）
+// 更新输入端口 (带连接保护)
 function update_input_ports(node, count__fixed, count__target, prefix, widget_name) {
     try {
         count__target = Math.max(0, Math.min(max__dynamic_ports, Math.floor(count__target)));
@@ -198,7 +198,7 @@ function update_input_ports(node, count__fixed, count__target, prefix, widget_na
             return target;
         }
 
-        // 添加端口（增量）
+        // 添加端口 (增量)
         if (target > current_dynamic) {
             console.log(`<dynamic_io> Adding ${target - current_dynamic} inputs`);
             for (let i = current_dynamic; i < target; i++) {
@@ -214,7 +214,7 @@ function update_input_ports(node, count__fixed, count__target, prefix, widget_na
             return target;
         }
 
-        // 移除端口（从后往前，遇连接即停）
+        // 移除端口 (从后往前,遇连接即停)
         if (target < current_dynamic) {
             console.log(`<dynamic_io> Removing inputs from ${current_dynamic} to ${target}`);
 
@@ -245,7 +245,7 @@ function update_input_ports(node, count__fixed, count__target, prefix, widget_na
     }
 }
 
-// 更新输出端口（类似逻辑）
+// 更新输出端口 (类似逻辑)
 function update_output_ports(node, count__fixed, count__target, prefix, widget_name) {
     try {
         count__target = Math.max(0, Math.min(max__dynamic_ports, Math.floor(count__target)));

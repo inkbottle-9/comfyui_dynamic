@@ -4,6 +4,8 @@ from .nodes.dynamic_script_node import DynamicScriptNode
 from .nodes.dynamic_load_text_node import DynamicLoadTextFileNode
 from .nodes.dynamic_switch_any_node import DynamicSwitchAnyNode
 from .nodes.dynamic_none_node import DynamicNoneNode
+from .nodes.dynamic_pipe_any_node import DynamicPipeAnyNode
+from .nodes.dynamic_random_number_node import DynamicRandomNumberNode
 
 
 
@@ -38,6 +40,8 @@ NODE_CLASS_MAPPINGS = {
     DynamicScriptNode.__name__: DynamicScriptNode,
     DynamicSwitchAnyNode.__name__: DynamicSwitchAnyNode,
     DynamicNoneNode.__name__: DynamicNoneNode,
+    DynamicPipeAnyNode.__name__: DynamicPipeAnyNode,
+    DynamicRandomNumberNode.__name__: DynamicRandomNumberNode,
 }
 
 # 显示名称
@@ -47,6 +51,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     DynamicScriptNode.__name__: DynamicScriptNode.NAME,
     DynamicSwitchAnyNode.__name__: DynamicSwitchAnyNode.NAME,
     DynamicNoneNode.__name__: DynamicNoneNode.NAME,
+    DynamicPipeAnyNode.__name__: DynamicPipeAnyNode.NAME,
+    DynamicRandomNumberNode.__name__: DynamicRandomNumberNode.NAME,
 }
 
 # JS 脚本目录

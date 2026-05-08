@@ -185,6 +185,13 @@ class DynamicScriptNode:
     # 返回端口工具提示
     OUTPUT_TOOLTIPS = ("Exception information or None.",)
 
+    DESCRIPTION = (
+        "This node is used to execute Python scripts within a workflow, "
+        "enabling functionality that is difficult or impossible to achieve using nodes alone. "
+        "It accepts multiple inputs and produces multiple outputs."
+        "When an exception occurs, relevant information is output to the fixed 'exception' port."
+    )
+
     # 输入类型 (默认状态下)
     @classmethod
     def INPUT_TYPES(cls):
@@ -217,10 +224,22 @@ class DynamicScriptNode:
                         "tooltip": "Allow importing any module. (use with caution, check the code first !!!)",
                     },
                 ),
+                "lazy_execution": (
+                    "BOOLEAN",
+                    {
+                        "default": False,
+                        "tooltip": (
+                            "Execute the code lazily. Note: Enable this option only when the script executed by this node is a pure function (output depends solely on the input; in other words, the same input always produces the same output). When this option is enabled, the node will re-execute only when the value at its input changes."
+                        ),
+                    },
+                ),
                 "code": (
                     "STRING",
                     {
-                        "placeholder": "code here... (with python. inputs/outputs are built-in list variables to access dynamic ports)",
+                        "placeholder": (
+                            "code here... (with python. inputs/outputs are built-in list variables to access dynamic ports. "
+                            "it is highly recommended to input script code via multi-line string nodes or text file read nodes to prevent script loss)"
+                        ),
                         "multiline": True,
                     },
                 ),
@@ -246,7 +265,7 @@ class DynamicScriptNode:
                     "flag__dynamic_inputs": True,
                     # 启用动态输出
                     "flag__dynamic_outputs": True,
-                    "count__fixed_inputs": 4,
+                    "count__fixed_inputs": 5,
                     "count__fixed_outputs": 1,
                     "name__dynamic_inputs_widget": "input_ports_count",
                     "name__dynamic_outputs_widget": "output_ports_count",
@@ -277,7 +296,9 @@ class DynamicScriptNode:
     # 总是刷新 (float("NaN") 不等于任何值, 也不等于自身)
     # 该函数应该接收和主函数相同的参数, 这里用 **kwargs 接收所有参数
     @classmethod
-    def IS_CHANGED(cls, **kwargs):
+    def IS_CHANGED(cls, lazy_execution, **kwargs):
+        if lazy_execution:
+            return "lazy_execution"
         return float("NaN")
 
     def main(
@@ -291,10 +312,10 @@ class DynamicScriptNode:
         """execute python script"""
 
         # 构建输入数组
-        inputs = []
+        inputs = [None] * input_ports_count
         # 可选的动态的输入端口数据在 kwargs 中
         for i in range(input_ports_count):
-            inputs.append(kwargs.get(f"input_{i}", None))
+            inputs[i] = kwargs.get(f"input_{i}", None)
 
         # 预分配输出数组 (None 本身是 python 中一个特殊的地址)
         outputs = [None] * output_ports_count

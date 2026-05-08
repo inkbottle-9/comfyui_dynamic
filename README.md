@@ -27,9 +27,9 @@
 - `DynamicScriptNode`
   - For dynamically executing Python code within a workflow
   - Can have any number of dynamically added input and output ports
-  - Always exposes a fixed “exception” output (emits  None  when no error occurs, otherwise outputs the exception object)
-    - The content can be viewed with the “Display Anything” node
-  - Further details are available in ComfyUI’s built-in node-documentation page ("Node Info" in the menu)
+  - Always exposes a fixed "exception" output (emits  None  when no error occurs, otherwise outputs the exception object)
+    - The content can be viewed with the "Display Anything" node
+  - Further details are available in ComfyUI's built-in node-documentation page ("Node Info" in the menu)
   - Refreshing the node may result in code loss. Try to avoid directly editing the code in the text box of the node
     - You can use the multi-line string node or the text file reading node to input the code into this node
     - Using VS Code for editing and saving the complete code file on your hard drive is a good choice
