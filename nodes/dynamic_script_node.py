@@ -38,6 +38,7 @@ list__allowed_modules = {
     "base64",  # 编解码
     "difflib",
     "textwrap",
+    "rich",  # 格式化输出
     # 路径操作
     "pathlib",  # 现代路径处理
     "os.path",  # 路径拼接, 判断
@@ -79,6 +80,7 @@ list__allowed_modules = {
     "uuid",
     "ipaddress",
     "copy",
+    "__future__",  # 实验性功能
 }
 
 # 定义需要禁用的危险内置函数
@@ -123,6 +125,7 @@ builtins__safe_internal = {
 # 检查包是否允许. 包的所有子包都视为允许
 def check_is_allowed(_name: str) -> bool:
     parts__target = _name.split(".")
+    # print(parts__target)
     # 遍历所有项比较
     for allowed in list__allowed_modules:
         parts__allowed = allowed.split(".")

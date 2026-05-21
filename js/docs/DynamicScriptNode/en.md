@@ -97,6 +97,7 @@
     "base64",
     "difflib",
     "textwrap",
+    "rich",
     "pathlib",
     "os.path",
     "ast",
@@ -130,5 +131,6 @@
     "uuid",
     "ipaddress",
     "copy",
+    "__future__",
     ```
 
