@@ -110,6 +110,7 @@
     "dataclasses",
     "typing",
     "inspect",
+    "aenum",
     "time",
     "datetime",
     "zoneinfo",

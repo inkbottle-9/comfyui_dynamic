@@ -51,6 +51,7 @@ list__allowed_modules = {
     "dataclasses",
     "typing",  # 类型提示
     "inspect",  # 查看对象信息
+    "aenum",  # 枚举扩展
     # 时间日期
     "time",
     "datetime",  # 时间戳, 格式化
