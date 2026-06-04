@@ -109,6 +109,7 @@
     "enum",
     "dataclasses",
     "typing",
+    "typing_extensions",
     "inspect",
     "aenum",
     "time",

@@ -50,6 +50,7 @@ list__allowed_modules = {
     "enum",
     "dataclasses",
     "typing",  # 类型提示
+    "typing_extensions",  # 旧版本兼容
     "inspect",  # 查看对象信息
     "aenum",  # 枚举扩展
     # 时间日期
