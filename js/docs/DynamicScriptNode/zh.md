@@ -108,6 +108,7 @@
     "functools",
     "enum",
     "dataclasses",
+    "types",
     "typing",
     "typing_extensions",
     "inspect",

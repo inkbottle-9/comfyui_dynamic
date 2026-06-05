@@ -49,6 +49,7 @@ list__allowed_modules = {
     "functools",  # 函数工具
     "enum",
     "dataclasses",
+    "types",
     "typing",  # 类型提示
     "typing_extensions",  # 旧版本兼容
     "inspect",  # 查看对象信息
