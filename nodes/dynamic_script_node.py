@@ -34,7 +34,13 @@ list__allowed_modules = {
     "json",  # JSON解析 (处理API响应, 配置)
     "csv",
     "html",
+    "xml",
+    "yaml",
     "tomllib",  # TOML 解析
+    "toml",  # TOML 解析
+    "tomli",  # TOML 解析
+    "jproperties",
+    "configparser",  # INI 解析
     "base64",  # 编解码
     "difflib",
     "textwrap",
