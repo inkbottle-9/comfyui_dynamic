@@ -45,6 +45,11 @@ def get_node_name(string__name: str) -> str:
     return f"{node_prefix}{string__name}"
 
 
+def check_is_equivalent_empty(_str: str):
+    """检查字符串是否等效为空 (None, 空字符串, 或仅包含空字符的字符串)"""
+    return _str is None or (isinstance(_str, str) and not _str.strip())
+
+
 # 为字符串追加标签
 def append_tags(
     string: str,

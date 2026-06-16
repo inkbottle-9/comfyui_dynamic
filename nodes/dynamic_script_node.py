@@ -14,6 +14,8 @@ from ..core.utils import any_type
 from ..core.utils import FlexibleOptionalInputTypeLazy
 from ..core.utils import ByPassTypeTuple
 from ..core.utils import get_node_name
+from ..core.utils import check_is_equivalent_empty
+
 
 # 允许导入的模块列表
 list__allowed_modules = {
@@ -369,10 +371,16 @@ class DynamicScriptNode:
 
         # 执行代码并捕获异常
         try:
-            # 编译代码
-            code_object__compiled = compile(code, "<dynamic_script>", "exec")
-            # 执行用户代码 (第二个参数是全局空间, 第三个参数是本地空间)
-            exec(code_object__compiled, environment__global)
+            # 检查代码是否为空
+            if not check_is_equivalent_empty(code):
+                # 编译代码
+                code_object__compiled = compile(code, "<dynamic_script>", "exec")
+                # 执行用户代码 (第二个参数是全局空间, 第三个参数是本地空间)
+                exec(code_object__compiled, environment__global)
+            else:
+                print("\n" + "=" * 80)
+                print(f"<dynamic> empty script\n")  # 打印到控制台 (日志)
+                print("=" * 80 + "\n")
 
             # 成功时返回结果 (第一个输出固定是 None, 可用于判断是否无异常)
             return (None, *outputs)
