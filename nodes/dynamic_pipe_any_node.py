@@ -8,7 +8,6 @@ from ..core.utils import ByPassTypeTuple
 
 
 class DynamicPipeAnyNode:
-
     # 节点名称
     NAME = append_tags(
         get_node_name("pipe_any "),
@@ -22,7 +21,7 @@ class DynamicPipeAnyNode:
     FUNCTION = "main"
 
     # 返回类型
-    RETURN_TYPES = ByPassTypeTuple(("python_list",))
+    RETURN_TYPES = ByPassTypeTuple(("*",))
     # 返回端口名称
     RETURN_NAMES = ByPassTypeTuple(("pipe",))
     # 返回端口工具提示
@@ -53,7 +52,7 @@ class DynamicPipeAnyNode:
             },
             "optional": {
                 "pipe": (
-                    "python_list",
+                    "*",
                     {"default": [], "tooltip": "The pipe in. Accept any Python list."},
                 ),
             },

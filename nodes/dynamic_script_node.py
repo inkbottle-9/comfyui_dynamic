@@ -19,6 +19,9 @@ from ..core.utils import check_is_equivalent_empty
 
 # 允许导入的模块列表
 list__allowed_modules = {
+    # ComfyUI 内置模块
+    "comfy",
+    "nodes",
     # 数值与数学
     "math",  # 数学运算
     "random",  # 随机数
@@ -325,6 +328,13 @@ class DynamicScriptNode:
     ):
         """execute python script"""
 
+        # 获取节点实例标题
+        unique_id = kwargs.get("unique_id", "")
+        prompt = kwargs.get("prompt", {})
+        node_data = prompt.get(unique_id, {})
+        title__node = node_data.get("_meta", {}).get("title", "dynamic_script")
+        title__node = f"[{title__node}]"
+
         # 构建输入数组
         inputs = [None] * input_ports_count
         # 可选的动态的输入端口数据在 kwargs 中
@@ -374,12 +384,12 @@ class DynamicScriptNode:
             # 检查代码是否为空
             if not check_is_equivalent_empty(code):
                 # 编译代码
-                code_object__compiled = compile(code, "<dynamic_script>", "exec")
+                code_object__compiled = compile(code, f"{title__node}", "exec")
                 # 执行用户代码 (第二个参数是全局空间, 第三个参数是本地空间)
                 exec(code_object__compiled, environment__global)
             else:
                 print("\n" + "=" * 80)
-                print(f"<dynamic> empty script\n")  # 打印到控制台 (日志)
+                print(f"<dynamic> {title__node} empty script\n")  # 打印到控制台 (日志)
                 print("=" * 80 + "\n")
 
             # 成功时返回结果 (第一个输出固定是 None, 可用于判断是否无异常)
@@ -393,7 +403,7 @@ class DynamicScriptNode:
                 type__exception, value__exception, traceback__exception
             )
 
-            message__to_log = f"<dynamic> script execution error\n"
+            message__to_log = f"<dynamic> {title__node} script execution error\n"
             print("\n" + "=" * 80)
             print(message__to_log)  # 打印到控制台 (日志)
             for line in lines__traceback:

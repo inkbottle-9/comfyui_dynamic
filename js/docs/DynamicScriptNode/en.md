@@ -78,6 +78,8 @@
   - Allowed package
 
     ```txt
+    "comfy",
+    "nodes",
     "math",
     "random",
     "cmath",

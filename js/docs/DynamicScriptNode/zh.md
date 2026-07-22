@@ -80,6 +80,8 @@
   - 允许的包
 
     ```txt
+    "comfy",
+    "nodes",
     "math",
     "random",
     "cmath",
