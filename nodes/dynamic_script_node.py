@@ -1,5 +1,6 @@
 import sys
 import traceback
+import types  # 新增: 用于创建用户自定义模块
 
 # import ast
 # import importlib
@@ -205,8 +206,9 @@ class DynamicScriptNode:
     DESCRIPTION = (
         "This node is used to execute Python scripts within a workflow, "
         "enabling functionality that is difficult or impossible to achieve using nodes alone. "
-        "It accepts multiple inputs and produces multiple outputs."
-        "When an exception occurs, relevant information is output to the fixed 'exception' port."
+        "It accepts multiple inputs and produces multiple outputs. "
+        "When an exception occurs, relevant information is output to the fixed 'exception' port. "
+        "The first N dynamic inputs (determined by module_count) are treated as user-defined module code."
     )
 
     # 输入类型 (默认状态下)
@@ -234,6 +236,31 @@ class DynamicScriptNode:
                         "tooltip": "The number of output ports for this node.",
                     },
                 ),
+                "module_count": (
+                    "INT",
+                    {
+                        "default": 0,
+                        "min": 0,
+                        "max": 100,
+                        "step": 1,
+                        "tooltip": (
+                            "Number of leading dynamic inputs to treat as user module code. "
+                            "These inputs will be compiled into importable modules before the main script runs. "
+                            "The actual script inputs start from input_{module_count}, "
+                            "but you can still access the input module code by inputs list in code"
+                        ),
+                    },
+                ),
+                "module_name_prefix": (
+                    "STRING",
+                    {
+                        "default": "dynamic_module",
+                        "tooltip": (
+                            "Prefix for auto-generated module names. The i-th module will be named {prefix}__{i}, "
+                            "then you can import them in your code."
+                        ),
+                    },
+                ),
                 "remove_import_restrictions": (
                     "BOOLEAN",
                     {
@@ -246,7 +273,9 @@ class DynamicScriptNode:
                     {
                         "default": False,
                         "tooltip": (
-                            "Execute the code lazily. Note: Enable this option only when the script executed by this node is a pure function (output depends solely on the input; in other words, the same input always produces the same output). When this option is enabled, the node will re-execute only when the value at its input changes."
+                            "Execute the code lazily. Note: Enable this option only when the script executed by this node is a pure function "
+                            "(output depends solely on the input; in other words, the same input always produces the same output). "
+                            "When this option is enabled, the node will re-execute only when the value at its input changes."
                         ),
                     },
                 ),
@@ -255,7 +284,8 @@ class DynamicScriptNode:
                     {
                         "placeholder": (
                             "code here... (with python. inputs/outputs are built-in list variables to access dynamic ports. "
-                            "it is highly recommended to input script code via multi-line string nodes or text file read nodes to prevent script loss)"
+                            "it is highly recommended to input script code via multi-line string nodes or text file read nodes to prevent script loss). "
+                            "you can import your custom modules here with name {module_name_prefix}__{i} (i starts form zero and i < module_count)"
                         ),
                         "multiline": True,
                     },
@@ -266,7 +296,7 @@ class DynamicScriptNode:
                 any_type,
                 None,
                 False,
-                "Dynamic inputs (input_0, input_1, ...).",
+                "Dynamic inputs (input_0, input_1, ...). First N inputs are module code if module_count > 0.",
             ),
             "hidden": {
                 "unique_id": "UNIQUE_ID",
@@ -282,7 +312,7 @@ class DynamicScriptNode:
                     "flag__dynamic_inputs": True,
                     # 启用动态输出
                     "flag__dynamic_outputs": True,
-                    "count__fixed_inputs": 5,
+                    "count__fixed_inputs": 7,
                     "count__fixed_outputs": 1,
                     "name__dynamic_inputs_widget": "input_ports_count",
                     "name__dynamic_outputs_widget": "output_ports_count",
@@ -322,11 +352,13 @@ class DynamicScriptNode:
         self,
         input_ports_count,
         output_ports_count,
+        module_name_prefix,
+        module_count,
         remove_import_restrictions,
         code,
         **kwargs,
     ):
-        """execute python script"""
+        """execute python script with user-defined modules"""
 
         # 获取节点实例标题
         unique_id = kwargs.get("unique_id", "")
@@ -335,7 +367,16 @@ class DynamicScriptNode:
         title__node = node_data.get("_meta", {}).get("title", "dynamic_script")
         title__node = f"[{title__node}]"
 
-        # 构建输入数组
+        # 计算实际有效的模块数
+        effective_module_count = min(module_count, input_ports_count)
+        if module_count > input_ports_count:
+            print(
+                f"\n<dynamic> {title__node} warning: module_count ({module_count}) "
+                f"exceeds input_ports_count ({input_ports_count}), "
+                f"only the first {effective_module_count} inputs will be treated as modules.\n"
+            )
+
+        # 构建脚本输入数组 (所有输入端包括模块代码也注入)
         inputs = [None] * input_ports_count
         # 可选的动态的输入端口数据在 kwargs 中
         for i in range(input_ports_count):
@@ -372,6 +413,24 @@ class DynamicScriptNode:
             # 注入自定义的 import 钩子 (用于限制可导入的包)
             builtins__final["__import__"] = strict_allowed_import
 
+        # 预收集所有将要注册的模块名, 用于构建支持用户模块的导入函数
+        list__registered_modules = []
+        for i in range(effective_module_count):
+            list__registered_modules.append(f"{module_name_prefix}__{i}")
+
+        # 如果有用户自定义模块且处于安全模式, 更新导入函数以放行这些模块
+        if list__registered_modules and not remove_import_restrictions:
+            allowed__user_modules = set(list__registered_modules)
+
+            def strict_allowed_import_with_user_modules(
+                name, globals=None, locals=None, fromlist=(), level=0
+            ):
+                if not (check_is_allowed(name) or name in allowed__user_modules):
+                    raise ImportError(f"<dynamic> prohibited module: {name}")
+                return builtins.__import__(name, globals, locals, fromlist, level)
+
+            builtins__final["__import__"] = strict_allowed_import_with_user_modules
+
         # 用户代码的执行环境
         environment__global = {
             "__builtins__": builtins__final,
@@ -381,6 +440,33 @@ class DynamicScriptNode:
 
         # 执行代码并捕获异常
         try:
+            # 注册用户自定义模块
+            for i in range(effective_module_count):
+                module_code = inputs[i]
+                module_name = f"{module_name_prefix}__{i}"
+
+                # 清理旧缓存
+                sys.modules.pop(module_name, None)
+
+                # 创建模块
+                module = types.ModuleType(module_name)
+                module.__file__ = f"{title__node}.{module_name}"
+                module.__dict__["__builtins__"] = builtins__final
+
+                # 检查模块代码是否为空
+                if check_is_equivalent_empty(module_code):
+                    print(
+                        f"\n<dynamic> {title__node} warning: module "
+                        f"{module_name} code is empty, registering as empty module.\n"
+                    )
+                else:
+                    # 编译并执行模块代码
+                    code_object__module = compile(module_code, module.__file__, "exec")
+                    exec(code_object__module, module.__dict__)
+
+                # 注册到 sys.modules, 使主脚本可以 import
+                sys.modules[module_name] = module
+
             # 检查代码是否为空
             if not check_is_equivalent_empty(code):
                 # 编译代码
@@ -422,3 +508,8 @@ class DynamicScriptNode:
                 context__exception,
                 *outputs,
             )
+
+        finally:
+            # 清理本次注册的模块缓存
+            for name in list__registered_modules:
+                sys.modules.pop(name, None)
