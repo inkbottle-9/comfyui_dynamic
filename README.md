@@ -33,8 +33,12 @@
   - Refreshing the node may result in code loss. Try to avoid directly editing the code in the text box of the node
     - You can use the multi-line string node or the text file reading node to input the code into this node
     - Using VS Code for editing and saving the complete code file on your hard drive is a good choice
+  - Now with custom module importing support (by the new "module_name_prefix" and "module_count" port)
 
-  ![DynamicScriptNode](./documents/DynamicScriptNode.png)
+  ![DynamicScriptNode](./documents/DynamicScriptNode__module_import.png)
+
+  - The old version (without custom module importing)
+    ![DynamicScriptNode](./documents/DynamicScriptNode.png)
 
 - `DynamicLoadTextFileNode`
   - Read text files from disk via the provided path

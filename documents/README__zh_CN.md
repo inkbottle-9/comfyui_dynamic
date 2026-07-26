@@ -33,8 +33,12 @@
   - 刷新节点可能会导致代码丢失, 尽量避免直接在节点的文本框中编辑代码
     - 可以使用多行字符串节点或文本文件读取节点输入代码至该节点
     - 使用 vs code 编辑并在您的硬盘上保存完整的代码文件是很好的选择
+  - 现在支持自定义模块导入 (通过新的 "module_name_prefix" 和 "module_count" 端口)
 
-  ![DynamicScriptNode](./DynamicScriptNode.png)
+  ![DynamicScriptNode](./DynamicScriptNode__module_import.png)
+
+  - 旧版 (无自定义模块导入)
+    ![DynamicScriptNode](./DynamicScriptNode.png)
 
 - `DynamicLoadTextFileNode`
   - 通过提供的路径读取硬盘上的文本文件
