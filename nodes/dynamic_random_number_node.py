@@ -1,55 +1,49 @@
+from comfy_api.latest import io
+
 from ..core.utils import get_category
-from ..core.utils import append_tags
-from ..core.utils import get_node_name
 from ..core.utils import generate_random
-from ..core.utils import ByPassTypeTuple
 
 
-class DynamicRandomNumberNode:
-    """随机整数节点"""
-    NAME = append_tags(
-        get_node_name("random_number "),
-        [
-            "int",
-        ],
-    )
-    CATEGORY = get_category("math")
-    FUNCTION = "main"
+# 随机整数节点 (V3)
+class DynamicRandomNumberNode(io.ComfyNode):
 
-    RETURN_TYPES = ByPassTypeTuple(("INT",))
-    RETURN_NAMES = ByPassTypeTuple(("random_int",))
-    OUTPUT_TOOLTIPS = ("A random integer between min and max.",)
-    DESCRIPTION = "Generates a random integer within a specified range. The value changes every execution."
-
+    # 总是刷新 (float("NaN") 不等于任何值, 也不等于自身)
     @classmethod
-    def IS_CHANGED(cls, min: int, max: int, **kwargs):
+    def fingerprint_inputs(cls, min: int = 0, max: int = 10, **kwargs):
         return float("NaN")
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "min": (
-                    "INT",
-                    {
-                        "default": 0,
-                        "min": 0,
-                        "step": 1,
-                        "tooltip": "The minimum value (inclusive) of the random number",
-                    },
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="DynamicRandomNumberNode",
+            display_name="dynamic_random_number",
+            category=get_category("math"),
+            description="Generates a random integer within a specified range. The value changes every execution.",
+            search_aliases=["int"],
+            inputs=[
+                io.Int.Input(
+                    "min",
+                    default=0,
+                    min=0,
+                    step=1,
+                    tooltip="The minimum value (inclusive) of the random number",
                 ),
-                "max": (
-                    "INT",
-                    {
-                        "default": 10,
-                        "min": 0,
-                        "step": 1,
-                        "tooltip": "The maximum value (exclusive) of the random number",
-                    },
+                io.Int.Input(
+                    "max",
+                    default=10,
+                    min=0,
+                    step=1,
+                    tooltip="The maximum value (exclusive) of the random number",
                 ),
-            },
-            "optional": {},
-        }
+            ],
+            outputs=[
+                io.Int.Output(
+                    display_name="random_int",
+                    tooltip="A random integer between min and max.",
+                ),
+            ],
+        )
 
-    def main(self, min: int, max: int):
-        return (generate_random(min, max),)
+    @classmethod
+    def execute(cls, min: int, max: int) -> io.NodeOutput:
+        return io.NodeOutput(generate_random(min, max))

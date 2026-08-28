@@ -34,6 +34,19 @@
     - 可以使用多行字符串节点或文本文件读取节点输入代码至该节点
     - 使用 vs code 编辑并在您的硬盘上保存完整的代码文件是很好的选择
   - 现在支持自定义模块导入 (通过新的 "module_name_prefix" 和 "module_count" 端口)
+  - 现在支持跨执行共享缓存: 脚本环境中注入了名为 `cache` 的全局单例字典,
+    所有 `DynamicScriptNode` 实例共享, 可以把计算开销巨大的值存入其中,
+    下次执行时直接读取 (键的增删改查完全由您的代码负责; 缓存仅存在于内存中,
+    ComfyUI 服务重启后清空)
+
+    ```python
+    # 示例: 缓存计算开销巨大的值
+    if "heavy_value" not in cache:
+        cache["heavy_value"] = expensive_computation(inputs[0])
+    outputs[0] = cache["heavy_value"]
+    ```
+
+    - 注意: 使用 `cache` 会让脚本不再是纯函数, 此时请勿开启 `lazy_execution`
 
   ![DynamicScriptNode](./DynamicScriptNode__module_import.png)
 
@@ -55,15 +68,26 @@
   git clone https://github.com/inkbottle-9/comfyui_dynamic.git
   ```
 
+- 版本要求: 本版本已迁移到 ComfyUI V3 节点规范 (`comfy_api`), 需要较新版本的 ComfyUI
+  (2025 年下半年之后的版本, 建议使用最新版); 旧版 ComfyUI 请使用本插件的历史版本
+
 
 ## 4. 依赖
 
 - 无依赖
 
 
-## 5. 注释
+## 5. 设置
+
+- 本插件在 ComfyUI 设置界面注册了如下设置项:
+  - `Script Node: warn when loading workflows with unrestricted import`
+    - 开启时 (默认): 加载包含已解除包导入限制的 `DynamicScriptNode` 的工作流时,
+      会弹出安全警告, 除非确认否则相关节点保持包导入限制
+    - 关闭时: 加载工作流不再弹出该警告, 节点按工作流保存的状态原样加载 (风险自负)
+
+
+## 6. 注释
 
 - 该插件暂不支持 Node 2.0 (不知道咋写)
 - 插件可能会有错误, 使用过程中若发现问题请务必于议题 (issue) 页提交相关信息
 - 如果对功能实现有什么建议, 或者需要其它的功能, 可以发表议题 (issue)
-

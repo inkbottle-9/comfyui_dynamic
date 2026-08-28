@@ -1,3 +1,5 @@
+# 注意: 该节点是旧版 (V1) 的半成品, 没有实现执行函数, 也未在 __init__.py 中注册.
+# 暂时原样保留, 暂不参与 V3 迁移, 也不会被加载.
 from ..core.utils import get_category
 from ..core.utils import append_tags
 from ..core.utils import get_node_name

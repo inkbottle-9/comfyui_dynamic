@@ -3,11 +3,11 @@ import hashlib
 import time
 from pathlib import Path
 
+from comfy_api.latest import io
 
 from ..core.utils import get_category
 from ..core.utils import read_file_safe
 from ..core.utils import check_is_text_encoding
-from ..core.utils import get_node_name
 
 
 list__all_encodings = sorted(set(encodings.aliases.aliases.values()))
@@ -16,49 +16,51 @@ list__text_encodings = [
 ]
 
 
-# 动态读取文本文件节点
-class DynamicLoadTextFileNode:
-    NAME = get_node_name("load_text_file ")
-    CATEGORY = get_category("utils")
-    FUNCTION = "main"
-    RETURN_TYPES = ("STRING", "*")
-    RETURN_NAMES = ("content", "exception")
-    OUTPUT_TOOLTIPS = (
-        "The content of the file.",
-        "Exception information or None.",
-    )
-    DESCRIPTION = "Loads the content of a text file. The content is returned as a string."
-
+# 动态读取文本文件节点 (V3)
+class DynamicLoadTextFileNode(io.ComfyNode):
     # 类级缓存, 按 unique_id 隔离多实例
     # 结构: {unique_id: {"path": str, "encoding": str, "result": str}}
     _cache = {}
 
-    # @classmethod 注解会使函数成为类方法, 第一个参数为类本身 (注意不是实例)
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "file_path": (
-                    "STRING",
-                    {
-                        "placeholder": "file full path (e.g. E:/dir/script.py)",
-                        "multiline": False,
-                        "tooltip": "The full path to the text file to load. (e.g. E:/dir/script.py)",
-                    },
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="DynamicLoadTextFileNode",
+            display_name="dynamic_load_text_file",
+            category=get_category("utils"),
+            description="Loads the content of a text file. The content is returned as a string.",
+            hidden=[io.Hidden.unique_id],
+            inputs=[
+                io.String.Input(
+                    "file_path",
+                    placeholder="file full path (e.g. E:/dir/script.py)",
+                    multiline=False,
+                    tooltip="The full path to the text file to load. (e.g. E:/dir/script.py)",
                 ),
-                "encoding": (
+                io.Combo.Input(
+                    "encoding",
                     # 获取所有编码类型
-                    list__text_encodings,
-                    {
-                        "default": "utf_8",
-                        "tooltip": "The encoding to use for reading the file.",
-                    },
+                    options=list__text_encodings,
+                    default="utf_8",
+                    tooltip="The encoding to use for reading the file.",
                 ),
-            },
-            "hidden": {
-                "unique_id": "UNIQUE_ID",
-            },
-        }
+            ],
+            outputs=[
+                io.String.Output(
+                    display_name="content",
+                    tooltip="The content of the file.",
+                ),
+                io.AnyType.Output(
+                    display_name="exception",
+                    tooltip="Exception information or None.",
+                ),
+            ],
+        )
+
+    @classmethod
+    def _get_unique_id(cls):
+        """从 V3 hidden 输入中安全地获取 unique_id"""
+        return getattr(getattr(cls, "hidden", None), "unique_id", None)
 
     @classmethod
     def _get_file_state(cls, file_path, encoding):
@@ -82,12 +84,11 @@ class DynamicLoadTextFileNode:
         except Exception as e:
             return f"EXCEPTION:{file_path}:{encoding}:{str(e)}:{time.time()}"
 
+    # 文件内容变化时强制节点重新执行 (V3 中 IS_CHANGED 更名为 fingerprint_inputs)
     @classmethod
-    def IS_CHANGED(cls, file_path, encoding, **kwargs):
-        unique_id = kwargs.get("unique_id")
-        # print(
-        #     f"<FUNC IS_CHANGED> file_path: {file_path}, encoding: {encoding}, unique_id: {unique_id}"
-        # )
+    def fingerprint_inputs(cls, file_path=None, encoding=None, **kwargs):
+        unique_id = cls._get_unique_id()
+
         state__return = None
 
         if file_path and encoding:
@@ -114,25 +115,21 @@ class DynamicLoadTextFileNode:
         else:
             # 无路径传入, 且缓存也不存在
             state__return = f"NONE_PATH_AND_NONE_CACHE:{file_path}:{encoding}:{time.time()}"
-        # print(f"STATE: {state__return}")
         return state__return
 
-    def main(self, file_path, encoding, **kwargs):
+    @classmethod
+    def execute(cls, file_path, encoding, **kwargs) -> io.NodeOutput:
         # 获取当前节点的唯一标识符
-        unique_id = kwargs.get("unique_id")
-
-        # print(
-        #     f"<FUNC main> file_path: {file_path}, encoding: {encoding}, unique_id: {unique_id}"
-        # )
+        unique_id = cls._get_unique_id()
 
         if unique_id and file_path:
-            result = self._get_file_state(file_path, encoding)
+            result = cls._get_file_state(file_path, encoding)
             # 缓存结果
-            self.__class__._cache[unique_id] = {
+            cls._cache[unique_id] = {
                 "path": file_path,
                 "encoding": encoding,
                 "result": result,
             }
-        # print(f"CACHE: {self.__class__._cache}")
         # 调用函数读取内容
-        return read_file_safe(file_path, "all", encoding, list__text_encodings)
+        content, error = read_file_safe(file_path, "all", encoding, list__text_encodings)
+        return io.NodeOutput(content, error)

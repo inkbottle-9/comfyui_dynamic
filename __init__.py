@@ -1,4 +1,8 @@
-from .core.utils import get_category
+# comfyui_dynamic 插件入口 (ComfyUI V3 API)
+#
+# V3 规范不再使用 NODE_CLASS_MAPPINGS / NODE_DISPLAY_NAME_MAPPINGS,
+# 而是通过 comfy_entrypoint() 返回一个 ComfyExtension 实例来注册节点.
+from comfy_api.latest import ComfyExtension, io
 
 from .nodes.dynamic_script_node import DynamicScriptNode
 from .nodes.dynamic_load_text_node import DynamicLoadTextFileNode
@@ -8,56 +12,25 @@ from .nodes.dynamic_pipe_any_node import DynamicPipeAnyNode
 from .nodes.dynamic_random_number_node import DynamicRandomNumberNode
 
 
-
-# class DynamicTestNode:
-#     # 节点名称
-#     NAME = "DynamicTestNode"
-#     # 节点分类
-#     CATEGORY = get_category("test")
-#     # 函数名
-#     FUNCTION = "run"
-#     # 返回类型
-#     RETURN_TYPES = ("STRING",)
-#     # 返回值默认名称
-#     RETURN_NAMES = ("text",)
-
-#     @classmethod
-#     def INPUT_TYPES(cls):
-#         return {
-#             "required": {
-#                 "name": ("STRING", {"default": "dynamic"}),
-#             }
-#         }
-
-#     def run(self, name):
-#         return (f"Hello, {name}! this node is for test only",)
+class DynamicExtension(ComfyExtension):
+    # 注意: get_node_list 必须声明为 async
+    async def get_node_list(self) -> list[type[io.ComfyNode]]:
+        return [
+            DynamicLoadTextFileNode,
+            DynamicScriptNode,
+            DynamicSwitchAnyNode,
+            DynamicNoneNode,
+            DynamicPipeAnyNode,
+            DynamicRandomNumberNode,
+        ]
 
 
-# 需要加载的节点类映射表
-NODE_CLASS_MAPPINGS = {
-    # DynamicTestNode.__name__: DynamicTestNode,
-    DynamicLoadTextFileNode.__name__: DynamicLoadTextFileNode,
-    DynamicScriptNode.__name__: DynamicScriptNode,
-    DynamicSwitchAnyNode.__name__: DynamicSwitchAnyNode,
-    DynamicNoneNode.__name__: DynamicNoneNode,
-    DynamicPipeAnyNode.__name__: DynamicPipeAnyNode,
-    DynamicRandomNumberNode.__name__: DynamicRandomNumberNode,
-}
+# comfy_entrypoint 可以是 async 也可以是普通函数, 两者均可
+async def comfy_entrypoint() -> DynamicExtension:
+    return DynamicExtension()
 
-# 显示名称
-NODE_DISPLAY_NAME_MAPPINGS = {
-    # DynamicTestNode.__name__: DynamicTestNode.NAME,
-    DynamicLoadTextFileNode.__name__: DynamicLoadTextFileNode.NAME,
-    DynamicScriptNode.__name__: DynamicScriptNode.NAME,
-    DynamicSwitchAnyNode.__name__: DynamicSwitchAnyNode.NAME,
-    DynamicNoneNode.__name__: DynamicNoneNode.NAME,
-    DynamicPipeAnyNode.__name__: DynamicPipeAnyNode.NAME,
-    DynamicRandomNumberNode.__name__: DynamicRandomNumberNode.NAME,
-}
 
-# JS 脚本目录
+# JS 脚本目录 (V3 中仍然通过 WEB_DIRECTORY 提供前端扩展)
 WEB_DIRECTORY = "./js"
 
-# __all__ = ['NODE_CLASS_MAPPINGS', 'WEB_DIRECTORY']
-
-__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
+__all__ = ["comfy_entrypoint", "WEB_DIRECTORY"]

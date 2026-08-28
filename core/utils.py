@@ -4,7 +4,6 @@ import warnings
 import codecs
 
 from functools import wraps
-from typing import Union
 from pathlib import Path
 from typing import Optional, List, Union, NamedTuple
 
@@ -63,17 +62,6 @@ def append_tags(
     return f"{string}{delimiter__start}{separator.join(list__tags)}{delimiter__end}"
 
 
-# 生成动态输入字典
-@deprecated
-def get_dynamic_inputs(num):
-    inputs = {}
-    for i in range(num):
-        ch = f"port__{i}"
-        # forceInput 允许再接线
-        inputs[ch] = ("*", {"forceInput": True})
-    return inputs
-
-
 class AnyType(str):
     """A special class that is always equal in not equal comparisons. Credit to pythongosssss"""
 
@@ -83,8 +71,13 @@ class AnyType(str):
 
 # credit to rgthree
 # https://github.com/rgthree/rgthree-comfy
-class FlexibleOptionalInputType(dict):
-    """A special class to make flexible nodes that pass data to our python handlers.
+class FlexibleOptionalInputTypeLazy(dict):
+    """支持 lazy 执行的 FlexibleOptionalInputType.
+
+    在 V3 节点中仍然需要它: 动态输入 (case_0, case_1, ...) 无法在 schema 中静态声明,
+    而 ComfyUI 的图编排阶段 (comfy_execution/graph.py) 会通过原始的 INPUT_TYPES() 查询
+    输入是否带有 lazy 标记. 在 V3 节点子类上覆盖 INPUT_TYPES 并返回本类的实例,
+    可以让动态输入继续参与懒执行 (懒执行的官方说明见 docs.comfy.org/custom-nodes/backend/lazy_evaluation).
 
     Enables both flexible/dynamic input types (like for Any Switch) or a dynamic number of inputs
     (like for Any Switch, Context Switch, Context Merge, Power Lora Loader, etc).
@@ -97,38 +90,6 @@ class FlexibleOptionalInputType(dict):
     type is supplied to our FlexibleOptionalInputType and returned for any non-data key. This can be a
     real type, or use the AnyType for additional flexibility.
     """
-
-    def __init__(self, type, data: Union[dict, None] = None):
-        """Initializes the FlexibleOptionalInputType.
-
-        Args:
-            type: The flexible type to use when ComfyUI retrieves an unknown key (via `__getitem__`).
-            data: An optional dict to use as the basis. This is stored both in a `data` attribute, so we
-                can look it up without hitting our overrides, as well as iterated over and adding its key
-                and values to our `self` keys. This way, when looked at, we will appear to represent this
-                data. When used in an "optional" INPUT_TYPES, these are the starting optional node types.
-        """
-        self.type = type
-        self.data = data
-        if self.data is not None:
-            for k, v in self.data.items():
-                self[k] = v
-
-    def __getitem__(self, key):
-        # If we have this key in the initial data, then return it. Otherwise return the tuple with our
-        # flexible type.
-        if self.data is not None and key in self.data:
-            val = self.data[key]
-            return val
-        return (self.type,)
-
-    def __contains__(self, key):
-        """Always contain a key, and we'll always return the tuple above when asked for it."""
-        return True
-
-
-class FlexibleOptionalInputTypeLazy(dict):
-    """支持 lazy 执行的 FlexibleOptionalInputType"""
 
     # tooltip 参数实际上不生效
     def __init__(
@@ -148,9 +109,6 @@ class FlexibleOptionalInputTypeLazy(dict):
                 self[k] = v
 
     def __getitem__(self, key):
-        # print("#" * 80)
-        # print(f"[__getitem__] key: {key}")
-
         self._keys__accessed.add(key)  # 记录访问
 
         if self.data is not None and key in self.data:
@@ -158,13 +116,9 @@ class FlexibleOptionalInputTypeLazy(dict):
         dict_item = {}
         # 添加 lazy 标记
         if self.lazy:
-            # print("#" * 80)
-            # print(self.lazy)
             dict_item["lazy"] = True
         # 添加工具提示
         if self.tooltip is not None:
-            # print("#" * 80)
-            # print(self.tooltip)
             dict_item["tooltip"] = self.tooltip
         # 如果没有特殊设置, 直接返回类型; 否则返回一个包含类型和设置的字典
         if dict_item:
@@ -173,24 +127,24 @@ class FlexibleOptionalInputTypeLazy(dict):
             return (self.type,)
 
     def __contains__(self, key):
-        # print("#" * 80)
-        # print(f"[__contains__] key: {key}")
         return True
 
     def __iter__(self):
-        # print("#" * 80)
-        # print(f"[__iter__] data keys: {list(self.data.keys()) if self.data else None}")
         return super().__iter__()
 
     def items(self):
-        # print("#" * 80)
-        # print(f"[items] _keys__accessed: {self._keys__accessed}")
         return super().items()
 
 
 class ByPassTypeTuple(tuple):
     """A special class that will return additional "AnyType" strings beyond defined values.
     Credit to Trung0246
+
+    在 V3 节点中仍然需要它: prompt 校验阶段 (execution.py) 会通过
+    `RETURN_TYPES[输出端口序号]` 取上游节点的输出类型, 而 JS 侧动态添加的输出端口
+    (output_0, output_1, ...) 并不存在于 V3 schema 静态声明的 outputs 中,
+    使用普通定长元组会在该校验处直接触发 IndexError 导致整个 prompt 校验失败.
+    在 V3 节点子类上用本类实例覆盖 RETURN_TYPES, 越界时返回 AnyType("*") 即可绕过该校验.
     """
 
     def __getitem__(self, index):
@@ -236,6 +190,9 @@ def read_file_safe(
 
     Returns:
         TextFileResult
+
+    注意: 'stream' 模式返回的是仍然处于打开状态的文件对象,
+    调用方必须在使用完毕后自行调用 close() 关闭它 (推荐使用 with 语句包裹).
     """
     path = Path(_path__file)
 
@@ -253,15 +210,17 @@ def read_file_safe(
     # 尝试多种编码
     for enc in list__encodings:
         try:
+            if _mode == "stream":
+                # BUG 修复: 旧实现把 open 放在 with 块内, return 时文件已被关闭,
+                # 调用方拿到的永远是一个已关闭的文件对象.
+                # 这里改为直接返回打开的文件对象, 由调用方负责关闭.
+                return (open(path, "r", encoding=enc, errors="strict"), None)
             # 打开文件, 使用 with 自动关闭
             with open(path, "r", encoding=enc, errors="strict") as file:
                 if _mode == "all":
                     return (file.read(), None)
                 elif _mode == "lines":
                     return (file.readlines(), None)
-                elif _mode == "stream":
-                    # 返回文件对象
-                    return (file, None)
                 else:
                     raise ValueError(f"Unsupported reading mode: {_mode}")
         except UnicodeDecodeError:

@@ -1,20 +1,12 @@
 import sys
 import traceback
-import types  # 新增: 用于创建用户自定义模块
-
-# import ast
-# import importlib
+import types  # 用于创建用户自定义模块
 import builtins
 
+from comfy_api.latest import io
+
 from ..core.utils import get_category
-
-# from ..utils import get_node_name
-from ..core.utils import append_tags
-
-from ..core.utils import any_type
-from ..core.utils import FlexibleOptionalInputTypeLazy
 from ..core.utils import ByPassTypeTuple
-from ..core.utils import get_node_name
 from ..core.utils import check_is_equivalent_empty
 
 
@@ -125,17 +117,6 @@ builtins__unsafe = {
     "__import__",
 }
 
-# 安全的内部函数
-builtins__safe_internal = {
-    "__build_class__",  # 类定义必需
-    "__debug__",  # 调试标志
-    "__doc__",  # 文档
-    "__name__",  # 模块名
-    "__package__",  # 包名
-    "__spec__",  # 模块规格
-    "__annotations__",  # 类型注解
-}
-
 
 # 检查包是否允许. 包的所有子包都视为允许
 def check_is_allowed(_name: str) -> bool:
@@ -158,211 +139,156 @@ def check_is_allowed(_name: str) -> bool:
 # 安全包装导入函数
 def strict_allowed_import(name, globals=None, locals=None, fromlist=(), level=0):
     """import module only if it's in the allowed list"""
-    # 只允许精确匹配 (不支持模糊匹配)
-    # if name not in list__allowed_modules:
-    #     raise ImportError(f"<dynamic> prohibited module: {name}")
     # 允许放行子模块
     if not check_is_allowed(name):
         raise ImportError(f"<dynamic> prohibited module: {name}")
 
     import_func__original = builtins.__import__
     # 执行导入
-    # module = importlib.import_module(name)
     module = import_func__original(name, globals, locals, fromlist, level)
-
-    # 删除父模块缓存 (防止通过 sys.modules 泄露)
-    # parts = name.split(".")
-    # for i in range(len(parts) - 1, 0, -1):  # 从父模块开始删
-    #     parent = ".".join(parts[:i])
-    #     if parent not in list__allowed_modules:
-    #         sys.modules.pop(parent, None)
 
     return module
 
 
-# 动态脚本节点
-class DynamicScriptNode:
-    # 节点名称
-    NAME = append_tags(
-        get_node_name("script "),
-        [
-            "python",
-            "executor",
-            "code",
-        ],
-    )
-    # 节点分类
-    CATEGORY = get_category("script")
-    # 函数名
-    FUNCTION = "main"
+# 动态脚本节点 (V3)
+class DynamicScriptNode(io.ComfyNode):
+    # 全局单例缓存字典, 供用户脚本跨工作流执行共享数据.
+    # 所有 DynamicScriptNode 实例共享同一个字典, 键的增删改查完全由用户代码负责.
+    # 生命周期与 ComfyUI 服务进程一致, 服务重启后内容清空.
+    # 注意: 使用缓存会让脚本不再是纯函数, 与 lazy_execution 的语义存在冲突 (见该参数的提示).
+    dict__cache: dict = {}
 
-    # 返回类型
+    # 注意: 这里有意覆盖 V3 基类标记为 final 的 RETURN_TYPES / RETURN_NAMES.
+    # 原因: prompt 校验阶段 (execution.py) 会通过 RETURN_TYPES[输出端口序号] 取上游节点的输出类型,
+    # 而前端 JS 动态添加的输出端口 (output_0, output_1, ...) 不存在于 V3 schema 静态声明的 outputs 中,
+    # 定长列表会在该校验处直接 IndexError. ByPassTypeTuple 越界时返回 AnyType("*") 以绕过该校验.
+    # @final 只是类型标注, 运行时类属性查找会优先命中本子类的定义.
     RETURN_TYPES = ByPassTypeTuple(("*",))
-    # 返回端口名称
     RETURN_NAMES = ByPassTypeTuple(("exception",))
-    # 返回端口工具提示
-    OUTPUT_TOOLTIPS = ("Exception information or None.",)
 
-    DESCRIPTION = (
-        "This node is used to execute Python scripts within a workflow, "
-        "enabling functionality that is difficult or impossible to achieve using nodes alone. "
-        "It accepts multiple inputs and produces multiple outputs. "
-        "When an exception occurs, relevant information is output to the fixed 'exception' port. "
-        "The first N dynamic inputs (determined by module_count) are treated as user-defined module code."
-    )
-
-    # 输入类型 (默认状态下)
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "input_ports_count": (
-                    "INT",
-                    {
-                        "default": 2,
-                        "min": 0,
-                        "max": 100,
-                        "step": 1,
-                        "tooltip": "The number of input ports for this node.",
-                    },
-                ),
-                "output_ports_count": (
-                    "INT",
-                    {
-                        "default": 1,
-                        "min": 0,
-                        "max": 100,
-                        "step": 1,
-                        "tooltip": "The number of output ports for this node.",
-                    },
-                ),
-                "module_count": (
-                    "INT",
-                    {
-                        "default": 0,
-                        "min": 0,
-                        "max": 100,
-                        "step": 1,
-                        "tooltip": (
-                            "Number of leading dynamic inputs to treat as user module code. "
-                            "These inputs will be compiled into importable modules before the main script runs. "
-                            "The actual script inputs start from input_{module_count}, "
-                            "but you can still access the input module code by inputs list in code"
-                        ),
-                    },
-                ),
-                "module_name_prefix": (
-                    "STRING",
-                    {
-                        "default": "dynamic_module",
-                        "tooltip": (
-                            "Prefix for auto-generated module names. The i-th module will be named {prefix}__{i}, "
-                            "then you can import them in your code."
-                        ),
-                    },
-                ),
-                "remove_import_restrictions": (
-                    "BOOLEAN",
-                    {
-                        "default": False,
-                        "tooltip": "Allow importing any module. (use with caution, check the code first !!!)",
-                    },
-                ),
-                "lazy_execution": (
-                    "BOOLEAN",
-                    {
-                        "default": False,
-                        "tooltip": (
-                            "Execute the code lazily. Note: Enable this option only when the script executed by this node is a pure function "
-                            "(output depends solely on the input; in other words, the same input always produces the same output). "
-                            "When this option is enabled, the node will re-execute only when the value at its input changes."
-                        ),
-                    },
-                ),
-                "code": (
-                    "STRING",
-                    {
-                        "placeholder": (
-                            "code here... (with python. inputs/outputs are built-in list variables to access dynamic ports. "
-                            "it is highly recommended to input script code via multi-line string nodes or text file read nodes to prevent script loss). "
-                            "you can import your custom modules here with name {module_name_prefix}__{i} (i starts form zero and i < module_count)"
-                        ),
-                        "multiline": True,
-                    },
-                ),
-            },
-            # 动态生成的输入会放在这里
-            "optional": FlexibleOptionalInputTypeLazy(
-                any_type,
-                None,
-                False,
-                "Dynamic inputs (input_0, input_1, ...). First N inputs are module code if module_count > 0.",
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="DynamicScriptNode",
+            display_name="dynamic_script",
+            category=get_category("script"),
+            description=(
+                "This node is used to execute Python scripts within a workflow, "
+                "enabling functionality that is difficult or impossible to achieve using nodes alone. "
+                "It accepts multiple inputs and produces multiple outputs. "
+                "When an exception occurs, relevant information is output to the fixed 'exception' port. "
+                "The first N dynamic inputs (determined by module_count) are treated as user-defined module code. "
+                "A global singleton dict named 'cache' is injected into the script environment, "
+                "allowing expensive values to be shared across workflow executions."
             ),
-            "hidden": {
-                "unique_id": "UNIQUE_ID",
-                "extra_pnginfo": "EXTRA_PNGINFO",
-                "prompt": "PROMPT",
-                "dynprompt": "DYNPROMPT",
-            },
-            # 自定义数据, 提供给 JS 脚本, 可以让脚本端判断哪些节点需要处理,
-            # 这避免了通过节点名称判断, 同时也传递一些配置信息:
-            "meta__dynamic": {
-                "dynamic_io": {
-                    # 启用动态输入
-                    "flag__dynamic_inputs": True,
-                    # 启用动态输出
-                    "flag__dynamic_outputs": True,
-                    "count__fixed_inputs": 7,
-                    "count__fixed_outputs": 1,
-                    "name__dynamic_inputs_widget": "input_ports_count",
-                    "name__dynamic_outputs_widget": "output_ports_count",
-                    "prefix__dynamic_inputs": "input_",
-                    "prefix__dynamic_outputs": "output_",
-                },
-                "warning": {
-                    # 需要判断状态的控件名称
-                    "widget_name__warning": "remove_import_restrictions",
-                    # 当控件值为该值时, 视为需要警告用户
-                    "status__warning": True,
-                    "status__rollback": False,
-                    # 警告信息
-                    "info__warning": "warning",
-                },
-                # 禁止连接
-                "connection_blocking": {
-                    # 键是固定端的索引 (对动态端也适用但无意义)
-                    # 值中的 1 表示禁止输入, 2 表示禁止输出
-                    # 为了代码实现的简便, 3 表示 x 位同时禁止输入输出
-                    0: 1,
-                    1: 1,
-                    2: 1,
-                },
-            },
-        }
+            search_aliases=["python", "executor", "code"],
+            # 动态输入端口 (input_0, input_1, ...) 由前端 JS 管理, 不在 schema 中声明;
+            # 打开此开关后, prompt 中未声明的输入会按原名作为 kwargs 传入 execute
+            accept_all_inputs=True,
+            hidden=[io.Hidden.unique_id, io.Hidden.prompt],
+            inputs=[
+                io.Int.Input(
+                    "input_ports_count",
+                    default=2,
+                    min=0,
+                    max=100,
+                    step=1,
+                    tooltip="The number of input ports for this node.",
+                    # socketless: 计数控件只允许作为纯控件存在, 禁止接线
+                    # (旧版用 connection_blocking.js 拦截连接, V3 原生支持该特性)
+                    socketless=True,
+                ),
+                io.Int.Input(
+                    "output_ports_count",
+                    default=1,
+                    min=0,
+                    max=100,
+                    step=1,
+                    tooltip="The number of output ports for this node.",
+                    socketless=True,
+                ),
+                io.Int.Input(
+                    "module_count",
+                    default=0,
+                    min=0,
+                    max=100,
+                    step=1,
+                    tooltip=(
+                        "Number of leading dynamic inputs to treat as user module code. "
+                        "These inputs will be compiled into importable modules before the main script runs. "
+                        "The actual script inputs start from input_{module_count}, "
+                        "but you can still access the input module code by inputs list in code"
+                    ),
+                    socketless=True,
+                ),
+                io.String.Input(
+                    "module_name_prefix",
+                    default="dynamic_module",
+                    tooltip=(
+                        "Prefix for auto-generated module names. The i-th module will be named {prefix}__{i}, "
+                        "then you can import them in your code."
+                    ),
+                ),
+                io.Boolean.Input(
+                    "remove_import_restrictions",
+                    default=False,
+                    tooltip="Allow importing any module. (use with caution, check the code first !!!)",
+                ),
+                io.Boolean.Input(
+                    "lazy_execution",
+                    default=False,
+                    tooltip=(
+                        "Execute the code lazily. Note: Enable this option only when the script executed by this node is a pure function "
+                        "(output depends solely on the input; in other words, the same input always produces the same output). "
+                        "When this option is enabled, the node will re-execute only when the value at its input changes. "
+                        "Warning: reading from or writing to 'cache' breaks the pure-function assumption, "
+                        "do not enable this option if your script uses 'cache'."
+                    ),
+                ),
+                io.String.Input(
+                    "code",
+                    placeholder=(
+                        "code here... (with python. inputs/outputs are built-in list variables to access dynamic ports. "
+                        "cache is a built-in global singleton dict shared across workflow executions. "
+                        "it is highly recommended to input script code via multi-line string nodes or text file read nodes to prevent script loss). "
+                        "you can import your custom modules here with name {module_name_prefix}__{i} (i starts form zero and i < module_count)"
+                    ),
+                    multiline=True,
+                ),
+            ],
+            outputs=[
+                io.AnyType.Output(
+                    display_name="exception",
+                    tooltip="Exception information or None.",
+                ),
+            ],
+        )
 
     # 总是刷新 (float("NaN") 不等于任何值, 也不等于自身)
     # 该函数应该接收和主函数相同的参数, 这里用 **kwargs 接收所有参数
     @classmethod
-    def IS_CHANGED(cls, lazy_execution, **kwargs):
+    def fingerprint_inputs(cls, lazy_execution=False, **kwargs):
         if lazy_execution:
             return "lazy_execution"
         return float("NaN")
 
-    def main(
-        self,
+    @classmethod
+    def execute(
+        cls,
         input_ports_count,
         output_ports_count,
-        module_name_prefix,
         module_count,
+        module_name_prefix,
         remove_import_restrictions,
+        lazy_execution,
         code,
         **kwargs,
-    ):
+    ) -> io.NodeOutput:
         """execute python script with user-defined modules"""
 
-        # 获取节点实例标题
-        unique_id = kwargs.get("unique_id", "")
-        prompt = kwargs.get("prompt", {})
+        # 获取节点实例标题 (V3 中 hidden 输入统一通过 cls.hidden 访问)
+        unique_id = getattr(cls.hidden, "unique_id", "")
+        prompt = getattr(cls.hidden, "prompt", {}) or {}
         node_data = prompt.get(unique_id, {})
         title__node = node_data.get("_meta", {}).get("title", "dynamic_script")
         title__node = f"[{title__node}]"
@@ -390,12 +316,8 @@ class DynamicScriptNode:
             # 完全开放模式
             builtins__final = __builtins__
         else:
-            # 自动获取所有非下划线开头的内置函数
-            # builtins__final = {
-            #     name: obj
-            #     for name, obj in builtins.__dict__.items()
-            #     if not name.startswith("_") and name not in builtins__unsafe
-            # }
+            # 黑名单过滤: 除了明确禁用的危险内置函数外全部放行
+            # (注意: 这只是防君子不防小人的提示性限制, 不是真正的安全沙盒)
             builtins__final = {}
             for name, obj in builtins.__dict__.items():
                 # 跳过黑名单中的函数
@@ -403,12 +325,6 @@ class DynamicScriptNode:
                     continue
                 else:
                     builtins__final[name] = obj
-                # # 允许非下划线开头的
-                # if not name.startswith("_"):
-                #     builtins__final[name] = obj
-                # 明确允许的内部函数
-                # elif name in builtins__safe_internal:
-                #     builtins__final[name] = obj
 
             # 注入自定义的 import 钩子 (用于限制可导入的包)
             builtins__final["__import__"] = strict_allowed_import
@@ -436,6 +352,9 @@ class DynamicScriptNode:
             "__builtins__": builtins__final,
             "inputs": inputs,
             "outputs": outputs,
+            # 注入全局单例缓存字典, 用户代码可以自行对其增删改查,
+            # 使计算开销巨大的值可以跨工作流执行共享 (服务重启后清空)
+            "cache": cls.dict__cache,
         }
 
         # 执行代码并捕获异常
@@ -479,7 +398,7 @@ class DynamicScriptNode:
                 print("=" * 80 + "\n")
 
             # 成功时返回结果 (第一个输出固定是 None, 可用于判断是否无异常)
-            return (None, *outputs)
+            return io.NodeOutput(None, *outputs)
 
         except Exception as e:
             type__exception, value__exception, traceback__exception = sys.exc_info()
@@ -504,7 +423,7 @@ class DynamicScriptNode:
                 "".join(lines__traceback),
             )
 
-            return (
+            return io.NodeOutput(
                 context__exception,
                 *outputs,
             )
