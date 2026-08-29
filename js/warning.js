@@ -151,7 +151,7 @@ app.registerExtension({
 
     // 官方钩子: 节点创建后调用, 绑定控件的回调以监听用户手动切换
     async nodeCreated(node) {
-        const config = NODE_CONFIGS[node?.type];
+        const config = NODE_CONFIGS[node?.comfyClass];
         if (!config)
             return;
 
@@ -181,7 +181,7 @@ app.registerExtension({
     // 官方钩子: 工作流加载时, 每个节点在整个图配置完成后调用.
     // 此时 widget 的值已经恢复为工作流保存的值.
     async loadedGraphNode(node) {
-        const config = NODE_CONFIGS[node?.type];
+        const config = NODE_CONFIGS[node?.comfyClass];
         if (!config)
             return;
 

@@ -7,6 +7,8 @@ from functools import wraps
 from pathlib import Path
 from typing import Optional, List, Union, NamedTuple
 
+from comfy_api.latest import io
+
 # 插件空间
 namespace = "dynamic"
 
@@ -71,6 +73,50 @@ class AnyType(str):
 
 # credit to rgthree
 # https://github.com/rgthree/rgthree-comfy
+class FlexibleOptionalInputType(dict):
+    """A special class to make flexible nodes that pass data to our python handlers.
+
+    Enables both flexible/dynamic input types (like for Any Switch) or a dynamic number of inputs
+    (like for Any Switch, Context Switch, Context Merge, Power Lora Loader, etc).
+
+    Initially, ComfyUI only needed to return True for `__contains__` below, which told ComfyUI that
+    our node will handle the input, regardless of what it is.
+
+    However, after https://github.com/comfyanonymous/ComfyUI/pull/2666 ComdyUI's execution changed
+    also checking the data for the key; specifcially, the type which is the first tuple entry. This
+    type is supplied to our FlexibleOptionalInputType and returned for any non-data key. This can be a
+    real type, or use the AnyType for additional flexibility.
+    """
+
+    def __init__(self, type, data: Union[dict, None] = None):
+        """Initializes the FlexibleOptionalInputType.
+
+        Args:
+            type: The flexible type to use when ComfyUI retrieves an unknown key (via `__getitem__`).
+            data: An optional dict to use as the basis. This is stored both in a `data` attribute, so we
+                can look it up without hitting our overrides, as well as iterated over and adding its key
+                and values to our `self` keys. This way, when looked at, we will appear to represent this
+                data. When used in an "optional" INPUT_TYPES, these are the starting optional node types.
+        """
+        self.type = type
+        self.data = data
+        if self.data is not None:
+            for k, v in self.data.items():
+                self[k] = v
+
+    def __getitem__(self, key):
+        # If we have this key in the initial data, then return it. Otherwise return the tuple with our
+        # flexible type.
+        if self.data is not None and key in self.data:
+            val = self.data[key]
+            return val
+        return (self.type,)
+
+    def __contains__(self, key):
+        """Always contain a key, and we'll always return the tuple above when asked for it."""
+        return True
+
+
 class FlexibleOptionalInputTypeLazy(dict):
     """支持 lazy 执行的 FlexibleOptionalInputType.
 
@@ -153,6 +199,21 @@ class ByPassTypeTuple(tuple):
         return super().__getitem__(index)
 
 
+# FIX: V3 基类会根据 schema 中静态声明的 outputs 数量自动推断 OUTPUT_IS_LIST,
+# 导致 merge_result_data 在合并结果时只保留与 schema 等长的输出, 截断所有动态输出.
+# 使用一个无限产出 False 的可迭代对象覆盖, 确保动态输出槽位不会被截断.
+class InfiniteFalseList:
+    def __iter__(self):
+        while True:
+            yield False
+
+    def __getitem__(self, index):
+        return False
+
+    def __len__(self):
+        return 0x7FFFFFFF
+
+
 any_type = AnyType("*")
 
 
@@ -194,7 +255,7 @@ def read_file_safe(
     注意: 'stream' 模式返回的是仍然处于打开状态的文件对象,
     调用方必须在使用完毕后自行调用 close() 关闭它 (推荐使用 with 语句包裹).
     """
-    path = Path(_path__file)
+    path: Path = Path(_path__file)
 
     # 检查文件是否存在
     if not path.exists():

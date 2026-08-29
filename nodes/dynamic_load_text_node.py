@@ -63,7 +63,7 @@ class DynamicLoadTextFileNode(io.ComfyNode):
         return getattr(getattr(cls, "hidden", None), "unique_id", None)
 
     @classmethod
-    def _get_file_state(cls, file_path, encoding):
+    def _get_file_state(cls, file_path: str, encoding: str):
         """计算文件状态标识, 用于缓存比较"""
         if not file_path:
             return f"NONE_PATH:{file_path}:{encoding}:{time.time()}"
@@ -86,7 +86,7 @@ class DynamicLoadTextFileNode(io.ComfyNode):
 
     # 文件内容变化时强制节点重新执行 (V3 中 IS_CHANGED 更名为 fingerprint_inputs)
     @classmethod
-    def fingerprint_inputs(cls, file_path=None, encoding=None, **kwargs):
+    def fingerprint_inputs(cls, file_path: str = None, encoding: str = None, **kwargs):
         unique_id = cls._get_unique_id()
 
         state__return = None
@@ -114,11 +114,13 @@ class DynamicLoadTextFileNode(io.ComfyNode):
             state__return = result
         else:
             # 无路径传入, 且缓存也不存在
-            state__return = f"NONE_PATH_AND_NONE_CACHE:{file_path}:{encoding}:{time.time()}"
+            state__return = (
+                f"NONE_PATH_AND_NONE_CACHE:{file_path}:{encoding}:{time.time()}"
+            )
         return state__return
 
     @classmethod
-    def execute(cls, file_path, encoding, **kwargs) -> io.NodeOutput:
+    def execute(cls, file_path: str, encoding: str, **kwargs) -> io.NodeOutput:
         # 获取当前节点的唯一标识符
         unique_id = cls._get_unique_id()
 
@@ -131,5 +133,7 @@ class DynamicLoadTextFileNode(io.ComfyNode):
                 "result": result,
             }
         # 调用函数读取内容
-        content, error = read_file_safe(file_path, "all", encoding, list__text_encodings)
+        content, error = read_file_safe(
+            file_path, "all", encoding, list__text_encodings
+        )
         return io.NodeOutput(content, error)

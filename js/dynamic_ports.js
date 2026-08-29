@@ -250,10 +250,10 @@ app.registerExtension({
     // 官方钩子: 节点创建后调用 (新建节点与工作流加载都会触发).
     // 此时 widgets 已就绪, 但加载中的节点尚未恢复工作流保存的值.
     async nodeCreated(node) {
-        const config = NODE_CONFIGS[node?.type];
+        const config = NODE_CONFIGS[node?.comfyClass];
         if (!config)
             return;
-        debugLog(`<dynamic_ports> nodeCreated: ${node.type} (ID: ${node.id})`);
+        debugLog(`<dynamic_ports> nodeCreated: ${node.comfyClass} (ID: ${node.id})`);
         hookWidgetCallback(node, config);
         // 对新建节点, 按控件默认值创建初始端口;
         // 对加载中的节点, 这里创建的端口随后会被 litegraph 的 configure 用保存数据覆盖,
@@ -264,10 +264,10 @@ app.registerExtension({
     // 官方钩子: 工作流加载时, 每个节点在整个图 (含连线) 配置完成后调用.
     // 此时 widget 值与端口连接均已恢复, 是同步端口的可靠时机.
     async loadedGraphNode(node) {
-        const config = NODE_CONFIGS[node?.type];
+        const config = NODE_CONFIGS[node?.comfyClass];
         if (!config)
             return;
-        debugLog(`<dynamic_ports> loadedGraphNode: ${node.type} (ID: ${node.id})`);
+        debugLog(`<dynamic_ports> loadedGraphNode: ${node.comfyClass} (ID: ${node.id})`);
         hookWidgetCallback(node, config);
         syncDynamicPorts(node, config);
     },

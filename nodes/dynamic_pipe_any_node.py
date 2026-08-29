@@ -2,17 +2,19 @@ from comfy_api.latest import io
 
 from ..core.utils import get_category
 from ..core.utils import ByPassTypeTuple
+from ..core.utils import InfiniteFalseList
 
 
 # 动态管道节点 (V3)
 class DynamicPipeAnyNode(io.ComfyNode):
-
     # 注意: 这里有意覆盖 V3 基类标记为 final 的 RETURN_TYPES / RETURN_NAMES.
     # 原因与 DynamicScriptNode 相同: prompt 校验阶段会用 RETURN_TYPES[输出端口序号] 取类型,
     # 而前端 JS 动态添加的输出端口 (output_0, output_1, ...) 不在 V3 schema 静态声明的 outputs 中,
     # 定长列表会在校验处直接 IndexError. ByPassTypeTuple 越界时返回 AnyType("*") 以绕过该校验.
     RETURN_TYPES = ByPassTypeTuple(("*",))
     RETURN_NAMES = ByPassTypeTuple(("pipe",))
+
+    OUTPUT_IS_LIST = InfiniteFalseList()
 
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -21,7 +23,7 @@ class DynamicPipeAnyNode(io.ComfyNode):
             display_name="dynamic_pipe_any",
             category=get_category("utils"),
             description=(
-                "This node works just like you'd expect. Still unsure? Here are the details: "
+                "This node works just like you'd expect. Here are the details: "
                 "it builds a new list sized to your ports_count. "
                 "Takes your pipe if you got one, pads with None or trims to fit, "
                 "then replaces positions with any connected dynamic inputs (input_*) that aren't None. "
@@ -46,13 +48,13 @@ class DynamicPipeAnyNode(io.ComfyNode):
                 io.AnyType.Input(
                     "pipe",
                     optional=True,
-                    tooltip="The pipe in. Accept any Python list.",
+                    tooltip="The pipe in. Accept any Python list or tuple.",
                 ),
             ],
             outputs=[
                 io.AnyType.Output(
                     display_name="pipe",
-                    tooltip="A pipe is essentially a Python list.",
+                    tooltip="Essentially outputs a Python list.",
                 ),
             ],
         )
@@ -70,6 +72,8 @@ class DynamicPipeAnyNode(io.ComfyNode):
     ) -> io.NodeOutput:
         # 获取 pipe 输入, 如果没有指定, 则使用 None
         list__input = kwargs.get("pipe", None)
+        if isinstance(list__input, tuple):
+            list__input = list(list__input)
         if isinstance(list__input, list):
             length = len(list__input)
             if length < ports_count:

@@ -7,6 +7,7 @@ from comfy_api.latest import io
 
 from ..core.utils import get_category
 from ..core.utils import ByPassTypeTuple
+from ..core.utils import InfiniteFalseList
 from ..core.utils import check_is_equivalent_empty
 
 
@@ -166,6 +167,8 @@ class DynamicScriptNode(io.ComfyNode):
     RETURN_TYPES = ByPassTypeTuple(("*",))
     RETURN_NAMES = ByPassTypeTuple(("exception",))
 
+    OUTPUT_IS_LIST = InfiniteFalseList()
+
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
@@ -267,7 +270,7 @@ class DynamicScriptNode(io.ComfyNode):
     # 总是刷新 (float("NaN") 不等于任何值, 也不等于自身)
     # 该函数应该接收和主函数相同的参数, 这里用 **kwargs 接收所有参数
     @classmethod
-    def fingerprint_inputs(cls, lazy_execution=False, **kwargs):
+    def fingerprint_inputs(cls, lazy_execution: bool = False, **kwargs):
         if lazy_execution:
             return "lazy_execution"
         return float("NaN")
@@ -275,13 +278,13 @@ class DynamicScriptNode(io.ComfyNode):
     @classmethod
     def execute(
         cls,
-        input_ports_count,
-        output_ports_count,
-        module_count,
-        module_name_prefix,
-        remove_import_restrictions,
-        lazy_execution,
-        code,
+        input_ports_count: int,
+        output_ports_count: int,
+        module_count: int,
+        module_name_prefix: str,
+        remove_import_restrictions: bool,
+        lazy_execution: bool,
+        code: str,
         **kwargs,
     ) -> io.NodeOutput:
         """execute python script with user-defined modules"""
@@ -400,7 +403,7 @@ class DynamicScriptNode(io.ComfyNode):
             # 成功时返回结果 (第一个输出固定是 None, 可用于判断是否无异常)
             return io.NodeOutput(None, *outputs)
 
-        except Exception as e:
+        except Exception:
             type__exception, value__exception, traceback__exception = sys.exc_info()
 
             # 堆栈行列表

@@ -3,10 +3,12 @@ from comfy_api.latest import io
 from ..core.utils import get_category
 from ..core.utils import any_type
 from ..core.utils import FlexibleOptionalInputTypeLazy
+from ..core.utils import InfiniteFalseList
 
 
 # 动态任意切换节点 (V3)
 class DynamicSwitchAnyNode(io.ComfyNode):
+    OUTPUT_IS_LIST = InfiniteFalseList()
 
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -77,7 +79,7 @@ class DynamicSwitchAnyNode(io.ComfyNode):
         return data
 
     @classmethod
-    def check_lazy_status(cls, index, cases_count, **kwargs):
+    def check_lazy_status(cls, index: int, cases_count: int, **kwargs):
         """
         kwargs 包含所有实际连接的动态输入, 检查是否需要执行指定的输入
         """
@@ -101,8 +103,8 @@ class DynamicSwitchAnyNode(io.ComfyNode):
     @classmethod
     def execute(
         cls,
-        index,
-        cases_count,
+        index: int,
+        cases_count: int,
         **kwargs,
     ) -> io.NodeOutput:
         """根据 index 返回对应的 case 输入, 如果 index 超出范围则返回 default"""
