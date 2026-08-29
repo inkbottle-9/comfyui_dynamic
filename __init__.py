@@ -6,22 +6,22 @@ from comfy_api.latest import ComfyExtension, io
 
 from .nodes.dynamic_script_node import DynamicScriptNode
 from .nodes.dynamic_load_text_node import DynamicLoadTextFileNode
-from .nodes.dynamic_switch_any_node import DynamicSwitchAnyNode
-from .nodes.dynamic_none_node import DynamicNoneNode
 from .nodes.dynamic_pipe_any_node import DynamicPipeAnyNode
+from .nodes.dynamic_switch_any_node import DynamicSwitchAnyNode
 from .nodes.dynamic_random_number_node import DynamicRandomNumberNode
+from .nodes.dynamic_none_node import DynamicNoneNode
 
 
 class DynamicExtension(ComfyExtension):
     # 注意: get_node_list 必须声明为 async
     async def get_node_list(self) -> list[type[io.ComfyNode]]:
         return [
-            DynamicLoadTextFileNode,
             DynamicScriptNode,
-            DynamicSwitchAnyNode,
-            DynamicNoneNode,
+            DynamicLoadTextFileNode,
             DynamicPipeAnyNode,
+            DynamicSwitchAnyNode,
             DynamicRandomNumberNode,
+            DynamicNoneNode,
         ]
 
 

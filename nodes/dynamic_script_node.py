@@ -281,7 +281,7 @@ class DynamicScriptNode(io.ComfyNode):
         input_ports_count: int,
         output_ports_count: int,
         module_count: int,
-        module_name_prefix: str,
+        module_name_prefix: str | None,
         remove_import_restrictions: bool,
         lazy_execution: bool,
         code: str,
@@ -296,8 +296,14 @@ class DynamicScriptNode(io.ComfyNode):
         title__node = node_data.get("_meta", {}).get("title", "dynamic_script")
         title__node = f"[{title__node}]"
 
+        # 检查模块名是否合法, 否则禁用
+        if not module_name_prefix:
+            print("\n<dynamic> module_name_prefix invalid, ignored")
+            module_count = 0
+
         # 计算实际有效的模块数
         effective_module_count = min(module_count, input_ports_count)
+
         if module_count > input_ports_count:
             print(
                 f"\n<dynamic> {title__node} warning: module_count ({module_count}) "
