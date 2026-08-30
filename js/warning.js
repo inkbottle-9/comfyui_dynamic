@@ -12,8 +12,11 @@
 import { app } from "../../scripts/app.js";
 
 
-// 全局设置项 id: 控制加载工作流时, 遇到已解除包导入限制的脚本节点是否弹出警告
-const SETTING_ID__WARN_ON_LOAD = "Dynamic.ScriptNode.WarnOnLoad";
+// 全局设置项
+const SETTING_ID__WARN_ON_LOAD = "ComfyDynamic.DynamicScriptNode.flag__warn_on_load";
+const SETTING_ID__ENABLE_LOGGING = "ComfyDynamic.General.flag__enable_logging";
+const SETTING_ID__SETTINGS_INFORMATION = "ComfyDynamic.General.information__settings";
+const SETTING_ID__GENERAL_INFORMATION = "ComfyDynamic.General.information__general";
 
 // 全局日志开关
 const WARNING_DEBUG = false;
@@ -142,10 +145,39 @@ app.registerExtension({
     settings: [
         {
             id: SETTING_ID__WARN_ON_LOAD,
-            name: "Script Node: warn when loading workflows with unrestricted import (加载含有解除包导入限制脚本节点的工作流时弹出安全警告)",
+            name: "Warn when loading workflows with unrestricted import (加载含有解除包导入限制脚本节点的工作流时弹出安全警告)",
             type: "boolean",
             defaultValue: true,
             tooltip: "When enabled, a confirmation dialog is shown if a loaded workflow contains DynamicScriptNode with import restrictions removed; the restriction is kept unless you confirm.",
+            category: ["Comfy Dynamic", "DynamicScriptNode", SETTING_ID__WARN_ON_LOAD]
+        },
+        {
+            id: SETTING_ID__ENABLE_LOGGING,
+            name: "Enable logging (启用日志)",
+            type: "boolean",
+            defaultValue: true,
+            tooltip: "Enable to print logs. Restart to apply. Recommended to keep enabled.",
+            category: ["Comfy Dynamic", "General", SETTING_ID__ENABLE_LOGGING]
+        },
+        {
+            id: SETTING_ID__SETTINGS_INFORMATION,
+            name: "IDs of setting items. You can edit '.../ComfyUI/user/default/comfy.settings.json' file directly",
+            type: "combo",
+            defaultValue: null,
+            options: [
+                { text: SETTING_ID__WARN_ON_LOAD, value: 0 },
+                { text: SETTING_ID__ENABLE_LOGGING, value: 1 },
+            ],
+            tooltip: "This option is used only to display the ID of the setting items used by this plugin, and has no other practical function.",
+            category: ["Comfy Dynamic", "Info", SETTING_ID__SETTINGS_INFORMATION]
+        },
+        {
+            id: SETTING_ID__GENERAL_INFORMATION,
+            name: "If you encounter any problems, please submit an issue. github: https://github.com/inkbottle-9/comfyui_dynamic",
+            type: "text",
+            defaultValue: "",
+            tooltip: "This option is used only to display some information, and has no other practical function.",
+            category: ["Comfy Dynamic", "Info", SETTING_ID__GENERAL_INFORMATION]
         },
     ],
 

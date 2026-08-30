@@ -5,7 +5,6 @@ from ..core.utils import get_category
 
 # 空值节点 (V3)
 class DynamicNoneNode(io.ComfyNode):
-
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
@@ -17,7 +16,7 @@ class DynamicNoneNode(io.ComfyNode):
                 io.AnyType.Input(
                     "any",
                     optional=True,
-                    tooltip="This input is ignored, but allows any type to be connected. (Not lazy so it will activate upstream nodes.)",
+                    tooltip="This input is ignored, but allows any type to be connected (will activate upstream nodes).",
                 ),
             ],
             outputs=[

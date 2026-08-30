@@ -1,7 +1,11 @@
-# utils.py
+from __future__ import annotations
+
 import random
 import warnings
 import codecs
+import os
+import json
+import folder_paths
 
 from functools import wraps
 from pathlib import Path
@@ -301,3 +305,42 @@ def generate_random(_min: int, _max: int):
     if _min > _max:
         _min, _max = _max, _min  # 交换, 确保 a <= b
     return random.randint(_min, _max)
+
+
+class LogUtils:
+    """日志工具"""
+
+    _flag__enable_logging: bool | None = None
+
+    @staticmethod
+    def get_comfy_setting(key: str, default=None):
+        """
+        读取 ComfyUI 前端设置 (comfy.settings.json)
+        通过官方 folder_paths API 获取用户目录路径
+        """
+        # 获取用户目录 (自动处理 --user-directory 参数和不同安装方式)
+        user_dir = folder_paths.get_user_directory()
+
+        # 设置文件路径: <user_dir>/default/comfy.settings.json
+        settings_path = os.path.join(user_dir, "default", "comfy.settings.json")
+
+        try:
+            with open(settings_path, "r", encoding="utf-8") as f:
+                settings = json.load(f)
+                return settings.get(key, default)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return default
+
+    @staticmethod
+    def check_enable_logging():
+        if LogUtils._flag__enable_logging is None:
+            LogUtils._flag__enable_logging = LogUtils.get_comfy_setting(
+                "ComfyDynamic.General.flag__enable_logging", True
+            )
+        return LogUtils._flag__enable_logging
+
+    @staticmethod
+    def print_log(*args, **kwargs):
+        """打印日志, 检查是否启用日志, 启用时将参数原样转发给 print"""
+        if LogUtils.check_enable_logging():
+            print(*args, **kwargs)

@@ -81,7 +81,9 @@ class DynamicSwitchAnyNode(io.ComfyNode):
     @classmethod
     def check_lazy_status(cls, index: int, cases_count: int, **kwargs):
         """
-        kwargs 包含所有实际连接的动态输入, 检查是否需要执行指定的输入
+        kwargs 包含所有实际连接的输入, 检查是否需要确定指定的输入.
+        该函数用于描述节点依赖哪些输入, 当依赖的输入有改动时,
+        会再获取节点指纹判断是否真正需要执行, 还是直接使用缓存的值
         """
         needed = []
 

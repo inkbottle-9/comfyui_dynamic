@@ -28,6 +28,7 @@ class DynamicPipeAnyNode(io.ComfyNode):
                 "Takes your pipe if you got one, pads with None or trims to fit, "
                 "then replaces positions with any connected dynamic inputs (input_*) that aren't None. "
                 "Outputs the full list as 'pipe', plus each item on its own through dynamic outputs (output_*)."
+                "This is an output node."
             ),
             search_aliases=["pipe"],
             # 动态输入端口 (input_0, input_1, ...) 由前端 JS 管理, 不在 schema 中声明;
@@ -57,12 +58,8 @@ class DynamicPipeAnyNode(io.ComfyNode):
                     tooltip="Essentially outputs a Python list.",
                 ),
             ],
+            is_output_node=True,
         )
-
-    # 总是刷新 (float("NaN") 不等于任何值, 也不等于自身)
-    @classmethod
-    def fingerprint_inputs(cls, **kwargs):
-        return float("NaN")
 
     @classmethod
     def execute(

@@ -9,6 +9,7 @@ from ..core.utils import get_category
 from ..core.utils import ByPassTypeTuple
 from ..core.utils import InfiniteFalseList
 from ..core.utils import check_is_equivalent_empty
+from ..core.utils import LogUtils
 
 
 # 允许导入的模块列表
@@ -122,7 +123,6 @@ builtins__unsafe = {
 # 检查包是否允许. 包的所有子包都视为允许
 def check_is_allowed(_name: str) -> bool:
     parts__target = _name.split(".")
-    # print(parts__target)
     # 遍历所有项比较
     for allowed in list__allowed_modules:
         parts__allowed = allowed.split(".")
@@ -183,6 +183,7 @@ class DynamicScriptNode(io.ComfyNode):
                 "The first N dynamic inputs (determined by module_count) are treated as user-defined module code. "
                 "A global singleton dict named 'cache' is injected into the script environment, "
                 "allowing expensive values to be shared across workflow executions."
+                "This is an output node."
             ),
             search_aliases=["python", "executor", "code"],
             # 动态输入端口 (input_0, input_1, ...) 由前端 JS 管理, 不在 schema 中声明;
@@ -265,6 +266,7 @@ class DynamicScriptNode(io.ComfyNode):
                     tooltip="Exception information or None.",
                 ),
             ],
+            is_output_node=True,
         )
 
     # 总是刷新 (float("NaN") 不等于任何值, 也不等于自身)
@@ -298,14 +300,14 @@ class DynamicScriptNode(io.ComfyNode):
 
         # 检查模块名是否合法, 否则禁用
         if not module_name_prefix:
-            print("\n<dynamic> module_name_prefix invalid, ignored")
+            LogUtils.print_log("\n<dynamic> module_name_prefix invalid, ignored")
             module_count = 0
 
         # 计算实际有效的模块数
         effective_module_count = min(module_count, input_ports_count)
 
         if module_count > input_ports_count:
-            print(
+            LogUtils.print_log(
                 f"\n<dynamic> {title__node} warning: module_count ({module_count}) "
                 f"exceeds input_ports_count ({input_ports_count}), "
                 f"only the first {effective_module_count} inputs will be treated as modules.\n"
@@ -383,7 +385,7 @@ class DynamicScriptNode(io.ComfyNode):
 
                 # 检查模块代码是否为空
                 if check_is_equivalent_empty(module_code):
-                    print(
+                    LogUtils.print_log(
                         f"\n<dynamic> {title__node} warning: module "
                         f"{module_name} code is empty, registering as empty module.\n"
                     )
@@ -402,9 +404,11 @@ class DynamicScriptNode(io.ComfyNode):
                 # 执行用户代码 (第二个参数是全局空间, 第三个参数是本地空间)
                 exec(code_object__compiled, environment__global)
             else:
-                print("\n" + "=" * 80)
-                print(f"<dynamic> {title__node} empty script\n")  # 打印到控制台 (日志)
-                print("=" * 80 + "\n")
+                LogUtils.print_log("\n" + "=" * 80)
+                LogUtils.print_log(
+                    f"<dynamic> {title__node} empty script\n"
+                )  # 打印到控制台 (日志)
+                LogUtils.print_log("=" * 80 + "\n")
 
             # 成功时返回结果 (第一个输出固定是 None, 可用于判断是否无异常)
             return io.NodeOutput(None, *outputs)
@@ -418,11 +422,11 @@ class DynamicScriptNode(io.ComfyNode):
             )
 
             message__to_log = f"<dynamic> {title__node} script execution error\n"
-            print("\n" + "=" * 80)
-            print(message__to_log)  # 打印到控制台 (日志)
+            LogUtils.print_log("\n" + "=" * 80)
+            LogUtils.print_log(message__to_log)  # 打印到控制台 (日志)
             for line in lines__traceback:
-                print(line, end="")
-            print("=" * 80 + "\n")
+                LogUtils.print_log(line, end="")
+            LogUtils.print_log("=" * 80 + "\n")
 
             context__exception = (
                 type__exception,
