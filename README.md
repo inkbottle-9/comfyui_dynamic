@@ -52,8 +52,6 @@
     - The add, delete, modify and query of this dictionary are entirely the responsibility of your code
     - This cache dictionary only exists in memory, and is cleared after ComfyUI service restart
     - Note: When using `cache`, the script is no longer a pure function, so `lazy_execution` is generally not enabled, which can easily cause errors
-  - Other properties
-    - `is_output_node` = True
 
     ```python
     # Example: Store computation-heavy values in cache
@@ -63,6 +61,9 @@
     # ...
     del cache["heavy_value"]  # Remove stored value
     ```
+
+  - Other properties
+    - `is_output_node` = True
 
   - More details can be found in ComfyUI's built-in node documentation page ("Node Info" in the menu)
 

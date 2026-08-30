@@ -52,8 +52,6 @@
     - 该字典的增删改查完全由您的代码负责
     - 该缓存字典仅存在于内存中, ComfyUI 服务重启后清空
     - 注意: 使用 `cache` 时脚本不再是纯函数, 此时一般不开启 `lazy_execution`, 容易造成错误
-  - 其它属性
-    - `is_output_node` = True
 
     ```python
     # 示例: 将计算开销巨大的值存入缓存
@@ -63,6 +61,9 @@
     # ...
     del cache["heavy_value"]  # 移除存储的值
     ```
+
+  - 其它属性
+    - `is_output_node` = True
 
   - 更多详细信息可在 ComfyUI 内置的节点文档页面找到 (菜单里的 "节点信息" "Node Info")
 
