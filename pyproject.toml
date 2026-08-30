@@ -1,6 +1,7 @@
 [project]
 name = "comfyui_dynamic"
 description = "Adds Python script execution and quality-of-life nodes to ComfyUI."
+# 9527
 version = "v0.1.0"
 license = { file = "LICENSE.md" }
 dependencies = []

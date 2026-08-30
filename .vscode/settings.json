@@ -23,6 +23,7 @@
         "pathlib",
         "pnginfo",
         "pycache",
+        "pyproject",
         "rgthree",
         "scipy",
         "skimage",
