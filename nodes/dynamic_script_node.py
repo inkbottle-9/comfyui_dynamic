@@ -172,7 +172,7 @@ class DynamicScriptNode(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
-            node_id="DynamicScriptNode",
+            node_id=cls.__name__,  # 直接使用类名
             display_name="dynamic_script",
             category=get_category("script"),
             description=(

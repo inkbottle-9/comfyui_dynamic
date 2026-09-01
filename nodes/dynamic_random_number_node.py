@@ -6,7 +6,6 @@ from ..core.utils import generate_random
 
 # 随机整数节点 (V3)
 class DynamicRandomNumberNode(io.ComfyNode):
-
     # 总是刷新 (float("NaN") 不等于任何值, 也不等于自身)
     @classmethod
     def fingerprint_inputs(cls, min: int = 0, max: int = 10, **kwargs):
@@ -15,7 +14,7 @@ class DynamicRandomNumberNode(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
-            node_id="DynamicRandomNumberNode",
+            node_id=cls.__name__,  # 直接使用类名
             display_name="dynamic_random_number",
             category=get_category("math"),
             description="Generates a random integer within a specified range. The value changes every execution.",

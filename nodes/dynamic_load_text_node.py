@@ -25,7 +25,7 @@ class DynamicLoadTextFileNode(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
-            node_id="DynamicLoadTextFileNode",
+            node_id=cls.__name__,  # 直接使用类名
             display_name="dynamic_load_text_file",
             category=get_category("utils"),
             description="Loads the content of a text file. The content is returned as a string.",

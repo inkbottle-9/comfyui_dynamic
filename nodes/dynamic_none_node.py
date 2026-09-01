@@ -8,7 +8,7 @@ class DynamicNoneNode(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
-            node_id="DynamicNoneNode",
+            node_id=cls.__name__,  # 直接使用类名
             display_name="dynamic_none",
             category=get_category("utils"),
             description="Always returns None.",

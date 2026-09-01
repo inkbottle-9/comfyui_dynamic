@@ -2,7 +2,7 @@
 name = "comfyui_dynamic"
 description = "Adds Python script execution and quality-of-life nodes to ComfyUI."
 # 9527
-version = "v1.0.0"
+version = "1.0.1"
 license = { file = "LICENSE.md" }
 dependencies = []
 classifiers = ["Operating System :: OS Independent"]
