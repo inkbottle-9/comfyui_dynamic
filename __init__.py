@@ -11,6 +11,7 @@ from .nodes.dynamic_pipe_any_node import DynamicPipeAnyNode
 from .nodes.dynamic_random_number_node import DynamicRandomNumberNode
 from .nodes.dynamic_script_node import DynamicScriptNode
 from .nodes.dynamic_switch_any_node import DynamicSwitchAnyNode
+from .nodes.dynamic_universal_selector import DynamicUniversalSelector
 
 
 class DynamicExtension(ComfyExtension):
@@ -23,6 +24,7 @@ class DynamicExtension(ComfyExtension):
             DynamicRandomNumberNode,
             DynamicScriptNode,
             DynamicSwitchAnyNode,
+            DynamicUniversalSelector,
         ]
 
 
@@ -42,6 +44,7 @@ NODE_CLASS_MAPPINGS = {
     DynamicRandomNumberNode.__name__: DynamicRandomNumberNode,
     DynamicScriptNode.__name__: DynamicScriptNode,
     DynamicSwitchAnyNode.__name__: DynamicSwitchAnyNode,
+    DynamicUniversalSelector.__name__: DynamicUniversalSelector,
 }
 
 

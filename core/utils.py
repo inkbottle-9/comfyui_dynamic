@@ -19,7 +19,7 @@ namespace = "dynamic"
 node_prefix = "dynamic_"
 
 # 把当前进程里所有后续出现的警告 (Warning) 的过滤级别强制设为始终显示
-warnings.simplefilter("always")
+# warnings.simplefilter("always")
 
 
 def deprecated(func):
@@ -340,7 +340,33 @@ class LogUtils:
         return LogUtils._flag__enable_logging
 
     @staticmethod
-    def print_log(*args, **kwargs):
+    def print_log(
+        _message: str, _name__node: str | None = None, _flag__crlf: bool = False
+    ):
         """打印日志, 检查是否启用日志, 启用时将参数原样转发给 print"""
         if LogUtils.check_enable_logging():
-            print(*args, **kwargs)
+            crlf = "\n" if _flag__crlf else ""
+            if _name__node:
+                print(f"{crlf}<comfy_dynamic> {_name__node}: {_message}{crlf}")
+            else:
+                print(f"{crlf}{_message}{crlf}")
+
+    @staticmethod
+    def print_block(
+        _message: str,
+        _list__lines: list[str] | None,
+        _name__node: str | None = None,
+        _flag__crlf: bool = False,
+    ):
+        """打印日志块"""
+        print("\n" + "=" * 80)
+        print(f"<comfy_dynamic> {_name__node}: {_message}")
+        if _list__lines:
+            print()
+        char__end = "\n" if _flag__crlf else ""
+        if isinstance(_list__lines, str):
+            print(_list__lines)
+        elif isinstance(_list__lines, list):
+            for line in _list__lines:
+                print(line, end=char__end)
+        print("=" * 80 + "\n")

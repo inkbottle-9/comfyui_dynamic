@@ -2,6 +2,8 @@ import sys
 import traceback
 import types  # 用于创建用户自定义模块
 import builtins
+import hashlib
+import threading
 
 from comfy_api.latest import io
 
@@ -158,6 +160,27 @@ class DynamicScriptNode(io.ComfyNode):
     # 生命周期与 ComfyUI 服务进程一致, 服务重启后内容清空.
     # 注意: 使用缓存会让脚本不再是纯函数, 与 lazy_execution 的语义存在冲突 (见该参数的提示).
     dict__cache: dict = {}
+    set__module_names: set[str] = set()
+    _lock__set = threading.RLock()  # 可重入锁
+
+    @classmethod
+    def clear_module_cache(cls, _name__module: str | None = None):
+        """清除缓存的模块, 传入 None 或空串时清除全部"""
+        with cls._lock__set:
+            if _name__module and _name__module in cls.set__module_names:
+                sys.modules.pop(_name__module, None)
+                cls.set__module_names.discard(_name__module)
+            else:
+                for name in cls.set__module_names:
+                    sys.modules.pop(name, None)
+                cls.set__module_names.clear()
+
+    @classmethod
+    def get_module_cache(cls):
+        """清除缓存的模块, 传入 None 或空串时清除全部"""
+        with cls._lock__set:
+            # 返回一个副本
+            return cls.set__module_names.copy()
 
     # 注意: 这里有意覆盖 V3 基类标记为 final 的 RETURN_TYPES / RETURN_NAMES.
     # 原因: prompt 校验阶段 (execution.py) 会通过 RETURN_TYPES[输出端口序号] 取上游节点的输出类型,
@@ -230,7 +253,27 @@ class DynamicScriptNode(io.ComfyNode):
                     default="dynamic_module",
                     tooltip=(
                         "Prefix for auto-generated module names. The i-th module will be named {prefix}__{i}, "
-                        "then you can import them in your code."
+                        "then you can import them in your code. Note that the module name is shared across nodes."
+                    ),
+                ),
+                io.Boolean.Input(
+                    "use_module_cache",
+                    default=True,
+                    tooltip=(
+                        "Reuse already-compiled user modules if their source code has not changed. "
+                        "This skips recompilation and speeds up execution. Modules are cached in sys.modules "
+                        "and persist until ComfyUI restarts or 'clear_cached_module' enabled."
+                    ),
+                ),
+                io.Boolean.Input(
+                    "clear_module_cache",
+                    default=False,
+                    tooltip=(
+                        "Remove all dynamically registered modules used by this node from sys.modules after finishes executing, "
+                        "regardless of success or failure. "
+                        "This forces full recompilation on the next run and ensures no stale module state remains. "
+                        "You can also use function 'clear_module_cache(str|None)' to clear specific|all cached modules, "
+                        "and function 'get_module_cache()' to get cached module names (return a set)."
                     ),
                 ),
                 io.Boolean.Input(
@@ -284,6 +327,8 @@ class DynamicScriptNode(io.ComfyNode):
         output_ports_count: int,
         module_count: int,
         module_name_prefix: str | None,
+        use_module_cache: bool | None,
+        clear_module_cache: bool | None,
         remove_import_restrictions: bool,
         lazy_execution: bool,
         code: str,
@@ -300,7 +345,7 @@ class DynamicScriptNode(io.ComfyNode):
 
         # 检查模块名是否合法, 否则禁用
         if not module_name_prefix:
-            LogUtils.print_log("\n<dynamic> module_name_prefix invalid, ignored")
+            LogUtils.print_log("module_name_prefix invalid, ignored", title__node)
             module_count = 0
 
         # 计算实际有效的模块数
@@ -308,9 +353,10 @@ class DynamicScriptNode(io.ComfyNode):
 
         if module_count > input_ports_count:
             LogUtils.print_log(
-                f"\n<dynamic> {title__node} warning: module_count ({module_count}) "
+                f"warning: module_count ({module_count}) "
                 f"exceeds input_ports_count ({input_ports_count}), "
-                f"only the first {effective_module_count} inputs will be treated as modules.\n"
+                f"only the first {effective_module_count} inputs will be treated as modules.",
+                title__node,
             )
 
         # 构建脚本输入数组 (所有输入端包括模块代码也注入)
@@ -366,36 +412,66 @@ class DynamicScriptNode(io.ComfyNode):
             # 注入全局单例缓存字典, 用户代码可以自行对其增删改查,
             # 使计算开销巨大的值可以跨工作流执行共享 (服务重启后清空)
             "cache": cls.dict__cache,
+            # 内部可以调用该函数清除模块缓存
+            "clear_module_cache": cls.clear_module_cache,
+            "get_module_cache": cls.get_module_cache,
         }
 
         # 执行代码并捕获异常
         try:
             # 注册用户自定义模块
             for i in range(effective_module_count):
-                module_code = inputs[i]
-                module_name = f"{module_name_prefix}__{i}"
-
-                # 清理旧缓存
-                sys.modules.pop(module_name, None)
-
-                # 创建模块
-                module = types.ModuleType(module_name)
-                module.__file__ = f"{title__node}.{module_name}"
-                module.__dict__["__builtins__"] = builtins__final
+                code__module = inputs[i]
+                name__module = f"{module_name_prefix}__{i}"
 
                 # 检查模块代码是否为空
-                if check_is_equivalent_empty(module_code):
+                if not isinstance(code__module, str) or check_is_equivalent_empty(
+                    code__module
+                ):
                     LogUtils.print_log(
-                        f"\n<dynamic> {title__node} warning: module "
-                        f"{module_name} code is empty, registering as empty module.\n"
+                        f"warning: module {name__module} is empty or invalid, ignored.",
+                        title__node,
                     )
-                else:
-                    # 编译并执行模块代码
-                    code_object__module = compile(module_code, module.__file__, "exec")
-                    exec(code_object__module, module.__dict__)
+                    continue
+
+                # 模块内容摘要
+                hash__code = hashlib.sha256(code__module.encode("utf-8")).hexdigest()
+
+                # 获取已缓存的模块
+                module__cached = (
+                    sys.modules.get(name__module) if use_module_cache else None
+                )
+                if module__cached is not None:
+                    hash__cached = getattr(
+                        module__cached, "__dynamic_script_code_hash__", None
+                    )
+                    if hash__cached == hash__code:
+                        continue  # 名字与内容都一致, 安全复用
+                    LogUtils.print_log(
+                        f"warning: module {name__module} "
+                        f"is cached but its code has changed, rebuilding.",
+                        title__node,
+                    )
+
+                # 清理旧缓存
+                sys.modules.pop(name__module, None)
+
+                # 创建模块
+                module = types.ModuleType(name__module)
+                module.__file__ = f"{title__node}.{name__module}"
+                module.__dict__["__builtins__"] = builtins__final
+                module.__dynamic_script_code_hash__ = hash__code  # 记录散列码
+
+                # 编译并执行模块代码
+                code_object__module = compile(code__module, module.__file__, "exec")
+                exec(code_object__module, module.__dict__)
 
                 # 注册到 sys.modules, 使主脚本可以 import
-                sys.modules[module_name] = module
+                sys.modules[name__module] = module
+
+                with cls._lock__set:
+                    # 记录模块名
+                    cls.set__module_names.add(name__module)
 
             # 检查代码是否为空
             if not check_is_equivalent_empty(code):
@@ -404,11 +480,7 @@ class DynamicScriptNode(io.ComfyNode):
                 # 执行用户代码 (第二个参数是全局空间, 第三个参数是本地空间)
                 exec(code_object__compiled, environment__global)
             else:
-                LogUtils.print_log("\n" + "=" * 80)
-                LogUtils.print_log(
-                    f"<dynamic> {title__node} empty script\n"
-                )  # 打印到控制台 (日志)
-                LogUtils.print_log("=" * 80 + "\n")
+                LogUtils.print_block("empty script", None, title__node)
 
             # 成功时返回结果 (第一个输出固定是 None, 可用于判断是否无异常)
             return io.NodeOutput(None, *outputs)
@@ -421,12 +493,9 @@ class DynamicScriptNode(io.ComfyNode):
                 type__exception, value__exception, traceback__exception
             )
 
-            message__to_log = f"<dynamic> {title__node} script execution error\n"
-            LogUtils.print_log("\n" + "=" * 80)
-            LogUtils.print_log(message__to_log)  # 打印到控制台 (日志)
-            for line in lines__traceback:
-                LogUtils.print_log(line, end="")
-            LogUtils.print_log("=" * 80 + "\n")
+            LogUtils.print_block(
+                "script execution error", lines__traceback, title__node
+            )
 
             context__exception = (
                 type__exception,
@@ -436,12 +505,28 @@ class DynamicScriptNode(io.ComfyNode):
                 "".join(lines__traceback),
             )
 
+            # 清理本次注册的模块缓存
+            for name in list__registered_modules:
+                sys.modules.pop(name, None)
+                with cls._lock__set:
+                    cls.set__module_names.discard(name)
+
             return io.NodeOutput(
                 context__exception,
                 *outputs,
             )
 
         finally:
-            # 清理本次注册的模块缓存
-            for name in list__registered_modules:
-                sys.modules.pop(name, None)
+            if clear_module_cache:
+                # 清理本次注册的模块缓存
+                for name in list__registered_modules:
+                    sys.modules.pop(name, None)
+                    with cls._lock__set:
+                        cls.set__module_names.discard(name)
+                    LogUtils.print_log(f"Module named {name} cleared", title__node)
+            if module_count > 0:
+                with cls._lock__set:
+                    LogUtils.print_log(
+                        f"Module cache after execution: {cls.set__module_names}",
+                        title__node,
+                    )
