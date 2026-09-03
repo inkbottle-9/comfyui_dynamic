@@ -116,6 +116,16 @@
   - Accepts an input `any` of any type, but this input is completely ignored
   - Can be used for placeholder, initialization or as a default value passed to other nodes
 
+- `DynamicUniversalSelector`
+  - Used to quickly query various file/option names in the ComfyUI environment
+  - Supports querying by category
+  - Supports regex matching
+  - Returns a list of items matching the pattern
+  - Very useful when you need to get text for certain model files. Practical use cases:
+    - Workflows require text-based configuration
+    - Too many model files to manage conveniently
+    - Need to quickly view all valid sampler or scheduler options
+
 
 ## 3. Installation
 

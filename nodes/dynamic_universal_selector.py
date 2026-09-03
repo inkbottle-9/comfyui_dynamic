@@ -2,6 +2,7 @@ import folder_paths
 import comfy
 import re
 import threading
+import random
 
 from comfy_api.latest import io
 from ..core.utils import get_category
@@ -78,9 +79,9 @@ class DynamicUniversalSelector(io.ComfyNode):
                 ),
                 io.Combo.Input(
                     "sort_mode",
-                    options=["ascending", "descending", "disabled"],
+                    options=["ascending", "descending", "shuffling", "disabled"],
                     default="ascending",
-                    tooltip="Sorting order of items.",
+                    tooltip="Sorting order of items. You can use 'shuffling' to produce a random first item.",
                 ),
                 io.Boolean.Input(
                     "search_all",
@@ -117,6 +118,14 @@ class DynamicUniversalSelector(io.ComfyNode):
             ],
             is_output_node=True,
         )
+
+    # 该函数应该接收和主函数相同的参数, 这里用 **kwargs 接收所有参数
+    @classmethod
+    def fingerprint_inputs(cls, sort_mode: str, **kwargs):
+        if isinstance(sort_mode, str) and sort_mode.lower() == "shuffling":
+            return float("NaN")
+        else:
+            return "lazy_execution"
 
     @classmethod
     def execute(
@@ -157,10 +166,12 @@ class DynamicUniversalSelector(io.ComfyNode):
                 list__matched = list(set__container)
 
         if sort_mode:
-            if sort_mode.lower() == "ascending":
+            if sort_mode.lower() == "ascending":  # 升序
                 list__matched = sorted(list__matched)
-            elif sort_mode.lower() == "descending":
+            elif sort_mode.lower() == "descending":  # 降序
                 list__matched = sorted(list__matched, reverse=True)
+            elif sort_mode.lower() == "shuffling":  # 乱序
+                random.shuffle(list__matched)
 
         return io.NodeOutput(
             list__matched[0] if list__matched else None,
