@@ -104,7 +104,7 @@ class DynamicUniversalSelector(io.ComfyNode):
                         "Outputs the first string from the matching list."
                         "In certain scenarios, you can use strict-matching regex to ensure that the matched item is unique. "
                         "This output is essentially a string, but its type is deliberately set to *, "
-                        "so you can connect it to any port that accepts COMBOl, e.g. the name port of a Checkpoint Loader"
+                        "so you can connect it to any port that accepts COMBO, e.g. the name port of a Checkpoint Loader"
                     ),
                 ),
                 io.AnyType.Output(
