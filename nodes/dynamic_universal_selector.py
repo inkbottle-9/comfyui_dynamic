@@ -49,7 +49,7 @@ class DynamicUniversalSelector(io.ComfyNode):
 
         return io.Schema(
             node_id=cls.__name__,  # 直接使用类名
-            display_name="dynamic_universal_selector",
+            display_name="Dynamic Universal Selector",
             category=get_category("utils"),
             description=(
                 "This node is used to quickly obtain some text, such as the model path, sampler name, etc."

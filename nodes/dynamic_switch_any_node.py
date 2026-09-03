@@ -14,7 +14,7 @@ class DynamicSwitchAnyNode(io.ComfyNode):
     def define_schema(cls) -> io.Schema:
         return io.Schema(
             node_id=cls.__name__,  # 直接使用类名
-            display_name="dynamic_switch_any",
+            display_name="Dynamic Switch Any Node",
             category=get_category("utils"),
             description=(
                 "This node is used to switch between multiple cases by index. "

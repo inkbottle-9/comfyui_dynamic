@@ -20,7 +20,7 @@ class DynamicPipeAnyNode(io.ComfyNode):
     def define_schema(cls) -> io.Schema:
         return io.Schema(
             node_id=cls.__name__,  # 直接使用类名
-            display_name="dynamic_pipe_any",
+            display_name="Dynamic Pipe Any Node",
             category=get_category("utils"),
             description=(
                 "This node works just like you'd expect. Here are the details: "

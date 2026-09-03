@@ -196,7 +196,7 @@ class DynamicScriptNode(io.ComfyNode):
     def define_schema(cls) -> io.Schema:
         return io.Schema(
             node_id=cls.__name__,  # 直接使用类名
-            display_name="dynamic_script",
+            display_name="Dynamic Script Node",
             category=get_category("script"),
             description=(
                 "This node is used to execute Python scripts within a workflow, "

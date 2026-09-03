@@ -15,7 +15,7 @@ class DynamicRandomNumberNode(io.ComfyNode):
     def define_schema(cls) -> io.Schema:
         return io.Schema(
             node_id=cls.__name__,  # 直接使用类名
-            display_name="dynamic_random_number",
+            display_name="Dynamic Random Number Node",
             category=get_category("math"),
             description="Generates a random integer within a specified range. The value changes every execution.",
             search_aliases=["int"],
