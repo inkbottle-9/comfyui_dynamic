@@ -1,1 +1,4 @@
-# no requirement
+# psutil: CPU / 内存统计 (ComfyUI 核心已依赖, 此处显式声明)
+psutil
+# pynvml: GPU 利用率与温度 (可选, 缺失或非 NVIDIA 环境时自动降级)
+pynvml
