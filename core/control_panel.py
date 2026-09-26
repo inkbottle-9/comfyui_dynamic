@@ -1,4 +1,4 @@
-# core/resource_monitor.py
+# core/control_panel.py
 # 资源监控后端服务: 提供 CPU / RAM / VRAM / GPU 利用率与已加载模型列表的快照接口,
 # 以及内存/显存清理动作 (由前端浮动面板通过 HTTP 端点触发).
 #
@@ -140,6 +140,20 @@ def _update_model_tracking(models: list[dict]) -> None:
         del _unloaded_models[MAX_UNLOADED_RECORDS:]
         _known_models.clear()
         _known_models.update(current)
+
+
+def _patcher_uuid(patcher) -> str:
+    """模型的稳定标识: 优先 clone_base_uuid (现代 CUI), 缺失时退回对象身份 id.
+
+    快照枚举与按 uuid 查找两处消费方必须共用本函数, 保证回退策略一致,
+    否则旧版 CUI (无 clone_base_uuid) 下两侧 uuid 永远对不上, 卸载/打开必然失败.
+    注意: id 回退在对象回收后可能被新对象复用, 已卸载记录存在被同名新对象
+    "复活" 的理论可能, 仅作为旧版兼容的降级路径.
+    """
+    uuid_val = getattr(patcher, "clone_base_uuid", None)
+    if uuid_val:
+        return str(uuid_val)
+    return f"id-{id(patcher):x}"
 
 
 # ============================================================
@@ -361,7 +375,7 @@ def _collect_loaded_models() -> list[dict]:
             path = _extract_model_path(patcher)
             entries.append(
                 {
-                    "uuid": str(getattr(patcher, "clone_base_uuid", id(patcher))),
+                    "uuid": _patcher_uuid(patcher),
                     "class": class_name,
                     "dtype": dtype_str,
                     "size": size,
@@ -408,21 +422,35 @@ def _cpu_temperature() -> float | None:
     return _cpu_temp_cache.get("value")
 
 
+# psutil 传感器命中 CPU 的关键词 (chip 名称与传感器标签小写匹配;
+# tctl/tdie 为 AMD CPU 的核心温度传感器惯用名)
+_CPU_TEMP_SENSOR_KEYWORDS = ("cpu", "package", "core", "tctl", "tdie")
+
+
 def _cpu_temp_psutil() -> float | None:
-    """psutil 温度读取: 取全部传感器当前值的最大值, 保守估计最热核心."""
+    """psutil 温度读取: 优先取名称/标签命中 CPU 关键词的传感器最大值,
+    无命中时退回全部传感器最大值 (可能选中 nvme/主板热区等非 CPU 来源,
+    精度有限, 仅兜底)."""
     try:
         temps = psutil.sensors_temperatures()
     except Exception:
         return None
-    best = None
-    for entries in (temps or {}).values():
+    cpu_best = None
+    any_best = None
+    for chip, entries in (temps or {}).items():
+        chip_l = str(chip).lower()
         for t in entries:
             try:
-                if t.current:
-                    best = max(best or 0.0, float(t.current))
+                if not t.current:
+                    continue
+                value = float(t.current)
+                any_best = max(any_best or 0.0, value)
+                label_l = f"{chip_l} {t.label or ''}".lower()
+                if any(k in label_l for k in _CPU_TEMP_SENSOR_KEYWORDS):
+                    cpu_best = max(cpu_best or 0.0, value)
             except Exception:
                 continue
-    return best
+    return cpu_best if cpu_best is not None else any_best
 
 
 # 后台温度缓存: {"value": float | None}
@@ -553,8 +581,15 @@ def _primary_vram_used() -> int:
         return 0
 
 
-def _cleanup_vram() -> dict:
-    """显存清理: 卸载全部模型 + GC + 清空 torch 缓存. 仅在队列空闲时调用."""
+def _cleanup_vram() -> dict | None:
+    """显存清理: 卸载全部模型 + GC + 清空 torch 缓存.
+
+    HTTP 层的忙时预检与本函数的实际执行位于不同线程, 之间存在 TOCTOU 窗口
+    (预检后任务可能恰好入队), 因此本函数入口再次复查队列状态: 忙时返回 None,
+    调用方据此按 "已排队" 语义响应, 与官方 /free 的延迟清理行为对齐.
+    """
+    if _is_busy():
+        return None
     mm = comfy.model_management
     before = _primary_vram_used()
     try:
@@ -671,7 +706,7 @@ def _find_loaded_by_uuid(uuid_str: str):
         patcher = getattr(lm, "model", None)
         if patcher is None:
             continue  # 幽灵条目, 视为不存在
-        if str(getattr(patcher, "clone_base_uuid", "")) == uuid_str:
+        if _patcher_uuid(patcher) == uuid_str:
             # 额外校验: 弱引用存活但内部 model 为 None 的半失效状态同样视为已卸载
             if getattr(patcher, "model", None) is None:
                 continue
@@ -695,17 +730,25 @@ def _count_ram_only_entries() -> int:
 
 
 def _unload_by_uuid(uuid_str: str) -> dict:
-    """卸载指定模型及其克隆, 并验证结果 (仅在队列空闲时调用, 调用方已检查).
+    """卸载指定模型及其克隆, 并验证结果.
+
+    忙时语义: HTTP 层预检 (409 fast-fail) 与本函数线程执行间存在 TOCTOU 窗口,
+    竞态输掉 (任务在预检后入队) 时入口复查兜底, 如实上报 busy 而非在任务
+    执行中强卸模型.
 
     CUI 的 unload_model_and_clones -> free_memory 只处理 device 匹配 GPU 的条目
     (get_all_torch_devices 不含 CPU), CPU load_device 模型 (如 CPU 模式文本编码器)
     会被静默跳过, 因此必须在调用后复核注册表与显存驻留, 杜绝假成功:
     - ok=True:               条目已从注册表移除 (真正卸载成功)
+    - ok=False, busy:        队列转忙, 放弃本次卸载
     - ok=False, ram_only:    条目仍在且显存驻留为 0 (权重本就在内存, 卸载无意义,
                              内存将在节点缓存淘汰该对象时释放)
     - ok=False, not_found:   模型不存在 (可能已被卸载)
     - ok=False, still_resident: 卸载调用后仍有显存驻留 (异常情况)
     """
+    if _is_busy():
+        return {"ok": False, "reason": "busy"}
+
     mm = comfy.model_management
     _, patcher = _find_loaded_by_uuid(uuid_str)
     if patcher is None:
@@ -823,6 +866,9 @@ def register_monitor_routes() -> None:
                 except Exception as e:
                     return web.json_response({"ok": False, "error": str(e)}, status=500)
             result = await asyncio.to_thread(_cleanup_vram)
+            if result is None:
+                # 竞态输掉: 预检后任务入队, 与忙时路径同样转交队列延迟清理
+                return web.json_response({"ok": True, "queued": True})
             # 卸载链路 (free_memory) 不处理 CPU load_device 模型, 如实上报跳过数量,
             # 前端据此提示 "n 个常驻内存的模型未受影响"
             skipped = await asyncio.to_thread(_count_ram_only_entries)
@@ -872,10 +918,20 @@ def register_monitor_routes() -> None:
         except Exception:
             return web.json_response({"error": "bad request"}, status=400)
 
+        path = None
         _, patcher = _find_loaded_by_uuid(uuid_str)
-        if patcher is None:
-            return web.json_response({"error": "model not found"}, status=404)
-        path = _extract_model_path(patcher)
+        if patcher is not None:
+            path = _extract_model_path(patcher)
+        else:
+            # 已卸载记录兜底: 记录内保存的模型路径支持直接定位 (文件可能仍在磁盘)
+            with _model_track_lock:
+                path = next(
+                    (rec.get("path") for rec in _unloaded_models
+                     if rec.get("uuid") == uuid_str),
+                    None,
+                )
+            if path is None:
+                return web.json_response({"error": "model not found"}, status=404)
         if not path:
             return web.json_response(
                 {"error": "no path info for this model"}, status=400

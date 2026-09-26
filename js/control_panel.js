@@ -1,6 +1,6 @@
-// js/resource_monitor.js
+// js/control_panel.js
 // 资源监控浮动面板 (无节点, 纯前端扩展):
-// - fixed 悬浮层: 标题栏 (拖动 / 暂停 / 重置 / 停靠切换 / 最小化, 双击最小化) +
+// - fixed 悬浮层: 标题栏 (状态图标 / 拖动 / 暂停 / 重置 / 停靠切换 / 点击穿透 / 最小化, 双击最小化) +
 //   内容区 (6 统计卡片 / 折线图 / 模型列表) + 消息行 + 底部状态栏 (语言 / 透明度 / 刷新率 / 坐标 / 位置 / 尺寸)
 // - 卡片: 占用超 50% 后背景与描边向告警色线性渐变; 温度卡以 100 C 为 100%
 // - 模型列表行: 状态配色 + 体积/已加载占比条 + 图标按钮 (复制/打开/卸载)
@@ -15,6 +15,8 @@ const API_BASE = "/comfyui_dynamic/monitor";
 const MAX_POINTS = 180; // 折线图历史点数 (10 Hz 下约 18 s 窗口)
 
 const DEFAULT_RATE = 2; // 刷新率默认值 (Hz)
+const RATE_MIN = 0;     // 刷新率下限 (0 = 暂停)
+const RATE_MAX = 10;    // 刷新率上限 (Hz)
 const DEFAULT_LANG = "en";
 
 const DEFAULT_OPACITY = 100; // 面板不透明度默认值 (%)
@@ -41,6 +43,14 @@ const DRAG_DBL_MS = 150; // 双击判定窗口 (ms): 相邻两次按下间隔小
 
 // 卡片告警渐变: 占用超过阈值后, t = (p - 阈值) / (100 - 阈值) 线性混入告警色
 const WARN_THRESHOLD = 50;
+
+// 告警阈值 (标题栏红色警告与告警次标题的判定依据, 见 computeAlerts)
+const ALERT_TEMP_C = 90;                       // 任一温度超过此值 (C) 触发温度告警
+const VRAM_MIN_FREE_FRACTION = 0.02;           // 显存剩余比例低于此值视为告急
+const VRAM_MIN_FREE_BYTES = 512 * 1024 * 1024; // 显存剩余字节下限 (与比例阈值取 max)
+const RAM_MIN_FREE_FRACTION = 0.10;            // 内存剩余比例低于此值视为告急
+// 温度卡满量程: 温度值 (C) 换算占用条百分比与告警渐变的基准 (TEMP_CARD_MAX_C = 100%)
+const TEMP_CARD_MAX_C = 100;
 
 // ============================================================
 // 颜色系统 (两层): 颜色层在上, 映射层在下, 调色时两处对照编辑
@@ -69,7 +79,7 @@ class RawColors {
     static grey__bbbbbb = "#BBBBBB";
     static grey__cccccc = "#CCCCCC";
     static grey__dddddd = "#DDDDDD";
-    static grey__e0e0e0 = "#E0E0E0";
+    static grey__eeeeee = "#EEEEEE";
     static white__ffffff = "#FFFFFF";
     static white__ffffff0f = "#FFFFFF0F"; // 6% 透明白 (折线图网格线)
     // 红
@@ -123,7 +133,7 @@ class ForegroundColors {
     // 模型列表
     static locationRemoved = RawColors.grey__777777;    // .dynmon-loc-removed 已移除徽章文本
     static classBadge = RawColors.blue__9ec1e8;         // .dynmon-class 类名徽章文本
-    static fileName = RawColors.grey__e0e0e0;           // .dynmon-fname 模型文件名
+    static fileName = RawColors.grey__eeeeee;           // .dynmon-fname 模型文件名
     static fileNameUnknown = RawColors.grey__777777;    // .dynmon-fname-unknown 未知文件名占位
     static size = RawColors.grey__999999;               // .dynmon-size 模型行大小
     static subText = RawColors.grey__888888;            // .dynmon-sub 模型行副文本
@@ -161,7 +171,7 @@ class BackgroundColors {
     // 面板 / 标题栏 (标题栏四态由 headerTick 状态机消费)
     static panel = RawColors.black__000000;             // .dynmon-panel 面板主体
     static header = RawColors.grey__333333;             // 标题栏常规 (原 HEADER_DEFAULT)
-    static headerAlert = RawColors.red__cc0000;         // 标题栏警告 (温度超限 / 显存或内存告急)
+    static headerAlert = RawColors.red__660000;         // 标题栏警告 (温度超限 / 显存或内存告急)
     static headerMinimized = RawColors.grey__333333;    // 标题栏最小化保持色 (原 HEADER_FLASH)
     static headerMinimizeFlash = RawColors.red__cc0000; // 标题栏最小化瞬间起始色 (原 HEADER_FLASH_START)
     // 指标卡片区
@@ -223,6 +233,7 @@ class BorderColors {
     static unloadButtonHover = RawColors.red__a04040;   // 行卸载按钮描边悬停
     static unloadAllButton = RawColors.red__660000;     // .dynmon-sec-btn 卸载全部按钮描边
     static unloadAllButtonHover = RawColors.red__a04040; // 卸载全部按钮描边悬停
+    static unloadedSectionDivider = RawColors.grey__444444; // .dynmon-unloaded-sec 顶部分隔线 (已加载/已卸载列表分界)
     // 状态栏
     static statusBarItemSeparator = RawColors.grey__444444; // .dynmon-sb-item 左侧分隔线
     // 弹层
@@ -263,7 +274,7 @@ const kebabCase = (name) => name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerC
 // 标题栏颜色状态机渐变时长 (见 MonitorPanel.initHeaderFx): 所有场景统一 0.5s
 const HEADER_FADE_MS = 500;
 
-const GITHUB_URL = "https://github.com/inkbottle-9/comfyui_dynamic";
+const REPO_URL = "https://github.com/inkbottle-9/comfyui_dynamic"; // 项目仓库 (帮助按钮跳转目标, 快捷链接末项复用)
 
 // 按钮行右侧下拉框 (始终显示占位文本, 不随选择改变)
 const QUICK_LINKS = [
@@ -276,36 +287,40 @@ const QUICK_LINKS = [
     { label: "Civitai (mirror)", url: "https://civitai.red" },
     { label: "CivArchive", url: "https://civarchive.com" },
     { label: "OpenModelDB", url: "https://openmodeldb.info" },
-    { label: "comfyui_dynamic (GitHub)", url: "https://github.com/inkbottle-9/comfyui_dynamic" },
+    { label: "comfyui_dynamic (GitHub)", url: REPO_URL },
 ];
 
-// 统计卡片定义 (顺序即展示顺序). pct: 从快照取百分比的取值函数; color: 占用条颜色 (引用映射层系列色)
+// 统计卡片定义 (顺序即展示顺序).
+// pct: 从快照取数值的取值函数; color: 占用条颜色 (引用映射层系列色);
+// max: 占用条满量程 (温度卡为 TEMP_CARD_MAX_C, 缺省 100)
 const CARDS = [
     { key: "cpu", label: "CPU", color: SeriesColors.cpu, pct: (d) => d.cpu?.percent },
     { key: "ram", label: "RAM", color: SeriesColors.ram, pct: (d) => d.ram?.percent },
     { key: "gpu", label: "GPU", color: SeriesColors.gpu, pct: (d) => d.devices?.[0]?.gpu_util },
     { key: "vram", label: "VRAM", color: SeriesColors.vram, pct: (d) => d.devices?.[0]?.vram_percent },
-    { key: "cpu_temp", label: "CPU C", color: SeriesColors.cpuTemp, pct: (d) => d.cpu?.temp },
-    { key: "gpu_temp", label: "GPU C", color: SeriesColors.gpuTemp, pct: (d) => d.devices?.[0]?.temperature },
+    { key: "cpu_temp", label: "CPU C", color: SeriesColors.cpuTemp, max: TEMP_CARD_MAX_C, pct: (d) => d.cpu?.temp },
+    { key: "gpu_temp", label: "GPU C", color: SeriesColors.gpuTemp, max: TEMP_CARD_MAX_C, pct: (d) => d.devices?.[0]?.temperature },
 ];
 
 // 折线图系列 (全部六项: 利用率 0-100%, 温度单独域, 各系列按 CHART_DOMAIN 线性映射)
 const CHART_SERIES = CARDS.slice();
 
 // 折线图各系列 y 轴数值域 [min, max] (线性映射到图表高度, 超界截断; key 缺失时回退 0-100):
-// 利用率为百分比天然 0-100; 温度用窄域放大波动可见性 (满量程 20-90 C, 覆盖常见空闲-高载区间)
+// 利用率为百分比天然 0-100; 温度用窄域放大波动可见性 (满量程 20-100 C, 覆盖常见空闲-高载区间)
 const CHART_DOMAIN = {
     cpu: [0, 100],
     ram: [0, 100],
     gpu: [0, 100],
     vram: [0, 100],
-    cpu_temp: [20, 90],
-    gpu_temp: [20, 90],
+    cpu_temp: [20, 100],
+    gpu_temp: [20, 100],
 };
 const CHART_DOMAIN_FALLBACK = [0, 100]; // CHART_DOMAIN 未覆盖的 key 的回退域
 
 // 运行时行为参数 (ms): 集中置顶便于调整
-const HEARTBEAT_MS = 100;      // 心跳周期: 驱动启用开关与对话框开关轮询
+const HEARTBEAT_MS = 100;      // 心跳周期: 驱动启用/设置热更新与对话框开关轮询
+const FETCH_FAIL_STREAK_THRESHOLD = 3; // 轮询连续失败达到此次数后进入退避
+const FETCH_FAIL_BACKOFF_MS = 5000;    // 退避间隔 (ms): 后端不可达时的最低重试周期
 const HEADER_TICK_MS = 33;     // 标题栏颜色渐变 tick (约 30fps)
 const MSG_CLEAR_MS = 3500;     // 消息行自动清空延时
 const ACTION_REFRESH_MS = 350; // 用户动作 (卸载/清理) 后主动刷新延时
@@ -319,16 +334,23 @@ const SIDEBAR_PROBE_MAX_LEFT = 2; // 距窗口左缘最大距离 (px)
 const SIDEBAR_PROBE_MIN_H = 100;  // 最小高度 (px, 排除小工具条)
 
 // 设置键 (ComfyUI settings id / localStorage 键共用)
-const SETTING_RATE = "dynamic.ResourceMonitor.refreshRate";
-const SETTING_LANG = "dynamic.ResourceMonitor.language";
-const SETTING_OPACITY = "dynamic.ResourceMonitor.opacity";
-const SETTING_ENABLE = "dynamic.ResourceMonitor.enabled";
+const SETTING_ID__RATE = "dynamic.ResourceMonitor.refreshRate";
+const SETTING_ID__LANG = "dynamic.ResourceMonitor.language";
+const SETTING_ID__OPACITY = "dynamic.ResourceMonitor.opacity";
+const SETTING_ID__ENABLE = "dynamic.ResourceMonitor.enabled";
 
 // 行内图标 (SVG, currentColor 继承按钮颜色, 卸载按钮通过 CSS 置红)
 const ICONS = {
     copy: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>',
     open: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8V6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v2"/><path d="M3 8h18l-2 11H5L3 8z"/></svg>',
     unload: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/><path d="M10 11v6M14 11v6"/></svg>',
+    // 标题栏状态图标 (主标题左侧, 随状态切换, 见 syncHeaderIcon): 常态仪表盘 / 告警红色三角
+    headerGauge: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>',
+    headerAlert: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 20h16a2 2 0 0 0 1.73-2Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>',
+    // 点击穿透按钮 (图标 = 点击后进入的状态, 与暂停按钮约定一致):
+    // 关闭态显示带斜线的指针 (点击开启穿透), 开启态显示普通指针 (点击恢复拦截)
+    pointerOff: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/><path d="M2 2l20 20"/></svg>',
+    pointer: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/></svg>',
 };
 
 
@@ -347,6 +369,9 @@ const LANGS = {
         undockTip: "Undock: restore previous floating position",
         minimizeTip: "Minimize (double-click title)",
         restoreTip: "Restore",
+        backendDown: "Backend disconnected",
+        passthroughTipOn: "Click-through is ON (panel ignores mouse, except this button). Click to disable",
+        passthroughTipOff: "Click-through is OFF. Click to let mouse events pass through the panel",
         cleanRam: "Free RAM",
         cleanVram: "Free VRAM",
         aggressive: "All processes",
@@ -359,23 +384,45 @@ const LANGS = {
         alertVram: (b) => `VRAM almost full (free ${b})`,
         alertRam: (b) => `RAM almost full (free ${b})`,
         helpTitle: "Resource Monitor - comfyui_dynamic",
+        // 帮助文案中的数值直接插值顶部常量, 避免双份维护 (未列出的除外)
         helpText: [
-            "Floating resource monitor from the comfyui_dynamic plugin.",
+            "Resource monitor floating panel from the comfyui_dynamic plugin.",
             "",
-            "Cards: usage percent; background/border fade to red above 50%. Temperature cards use 100 C = 100%.",
-            "Chart: recent CPU / RAM / GPU / VRAM utilization and temperature history.",
+            "Cards: CPU / RAM / GPU / VRAM utilization and CPU / GPU temperature "
+            + "(temperature full scale = " + TEMP_CARD_MAX_C + " C). "
+            + "Card background/border fade to red above " + WARN_THRESHOLD + "% usage.",
+            "Chart: history of all six series above; utilization is mapped to 0-100%, "
+            + "temperature to a " + CHART_DOMAIN.cpu_temp[0] + "-" + CHART_DOMAIN.cpu_temp[1]
+            + " C window for better visibility.",
             "",
-            "Loaded models: green border = currently in use; bottom bar shows model size vs VRAM "
-            + "(red = loaded in VRAM, blue = remaining in RAM).",
-            "Unloaded models: models released since page load (kept for reference, max 100).",
+            "Loaded models: green border = in use; bottom bar shows model size relative to the "
+            + "primary GPU VRAM (red = resident in VRAM, blue = remaining in RAM).",
+            "Row buttons: copy full details / locate the file in the file manager / unload from VRAM.",
+            "Unloaded models: models released since page load (newest first, reference only).",
             "",
-            "Header color: red = warning (any temp > 90 C, VRAM nearly full, or RAM free < 10%); "
-            + "blue flash = just minimized.",
-            "Actions: Free RAM / Free VRAM clean up immediately when idle, or queue for after the current task.",
+            "Header: the icon left of the title is a dashboard in normal state and a red warning "
+            + "triangle on alerts - any temp above " + ALERT_TEMP_C + " C, VRAM almost full, "
+            + "RAM free below " + Math.round(RAM_MIN_FREE_FRACTION * 100) + "%, or the backend "
+            + "disconnected (the subtitle then shows the disconnection). "
+            + "Red flash = just minimized.",
+            "Header buttons: help (this text) / click-through toggle / pause / reset "
+            + "(default size + dock) / dock toggle / minimize. Double-click the title to "
+            + "minimize; drag to move. Click-through makes the panel ignore all mouse events "
+            + "except its toggle button.",
+            "",
+            "Actions: Free VRAM defers to after the current task when busy; "
+            + "Free RAM always runs immediately, even during a task.",
+            "",
+            "Status bar: language / opacity (" + MIN_OPACITY + "-" + MAX_OPACITY + "%) / refresh "
+            + "rate (0-" + RATE_MAX + " Hz, 0 = paused) / mouse position / panel position and size.",
+            "Settings persist via ComfyUI settings (localStorage fallback).",
+            "",
+            "This ? button: single-click copies this help text to the clipboard; "
+            + "double-click opens the project GitHub repository: " + REPO_URL,
         ].join("\n"),
         langTip: "UI language",
-        rateTip: "Refresh rate (0-10 Hz, 0 = paused)",
-        opacityTip: "Panel opacity (30-100%)",
+        rateTip: "Refresh rate (0-" + RATE_MAX + " Hz, 0 = paused)",
+        opacityTip: "Panel opacity (" + MIN_OPACITY + "-" + MAX_OPACITY + "%)",
         mouseTip: "Mouse position",
         posTip: "Panel position",
         sizeTip: "Panel size",
@@ -416,6 +463,8 @@ const LANGS = {
         ramDesc: (b) => `RAM ${b}`,
         copied: (n) => `Copied: ${n}`,
         copiedFull: "Copied full details",
+        helpCopied: "Help text copied to clipboard",
+        helpCopyFail: "Copy failed",
         freedRam: (b) => `RAM freed: ~${b} (estimated)`,
         freedVram: (b) => `VRAM freed: ~${b} (estimated)`,
         queuedClean: "A task is running; cleanup will run after it finishes",
@@ -455,6 +504,9 @@ const LANGS = {
         undockTip: "退出停靠: 恢复之前的浮动位置",
         minimizeTip: "最小化 (可双击标题栏)",
         restoreTip: "还原",
+        backendDown: "后端已断连",
+        passthroughTipOn: "点击穿透已开启 (面板忽略鼠标, 仅本按钮可交互). 点击关闭",
+        passthroughTipOff: "点击穿透已关闭. 点击开启后, 鼠标事件将穿透面板直达下层内容",
         cleanRam: "清理内存",
         cleanVram: "清理显存",
         aggressive: "全进程",
@@ -466,22 +518,41 @@ const LANGS = {
         alertVram: (b) => `显存告急 (剩余 ${b})`,
         alertRam: (b) => `内存告急 (剩余 ${b})`,
         helpTitle: "资源监控 - comfyui_dynamic",
+        // 帮助文案中的数值直接插值顶部常量, 避免双份维护 (未列出的除外)
         helpText: [
             "comfyui_dynamic 插件自带的资源监控浮动面板.",
             "",
-            "统计卡片: 占用百分比, 超过 50% 后背景与描边渐变为红色; 温度卡以 100 C = 100%.",
-            "折线图: CPU / RAM / GPU / VRAM 利用率与温度的近期历史.",
+            "统计卡片: CPU / RAM / GPU / VRAM 利用率与 CPU / GPU 温度 "
+            + "(温度满量程 = " + TEMP_CARD_MAX_C + " C). "
+            + "占用超过 " + WARN_THRESHOLD + "% 后卡片背景与描边渐变为红色.",
+            "折线图: 上述六个系列的近期历史; 利用率映射到 0-100%, 温度映射到 "
+            + CHART_DOMAIN.cpu_temp[0] + "-" + CHART_DOMAIN.cpu_temp[1] + " C 窗口以提高可读性.",
             "",
-            "已加载模型: 绿色边框 = 正在使用; 底部横条显示模型体积与显存的比例 "
+            "已加载模型: 绿色边框 = 正在使用; 底部横条显示模型体积与主 GPU 显存的比例 "
             + "(红色 = 已加载进显存, 蓝色 = 仍在内存的部分).",
-            "已卸载模型: 页面打开后被释放的模型记录 (最多保留 100 条, 仅供参考).",
+            "行按钮: 复制完整信息 / 在文件管理器中定位文件 / 从显存卸载.",
+            "已卸载模型: 页面打开后被释放的模型记录 (最新在前, 仅供参考).",
             "",
-            "标题栏颜色: 红色 = 警告 (任一温度超 90 C / 显存或内存告急); 蓝色闪动 = 刚被最小化.",
-            "清理按钮: 队列空闲时立即生效, 任务执行中则延迟到任务结束后自动执行.",
+            "标题栏: 主标题左侧图标常态为仪表盘, 出现警告时变为红色三角 - "
+            + "任一温度超过 " + ALERT_TEMP_C + " C / 显存告急 / 内存剩余不足 "
+            + Math.round(RAM_MIN_FREE_FRACTION * 100) + "% / 后端断连 "
+            + "(断连时副标题显示断连提示); 红色闪动 = 刚被最小化.",
+            "标题栏按钮: 帮助 (本段文本) / 点击穿透切换 / 暂停 / 重置 (默认尺寸 + 停靠) / "
+            + "停靠切换 / 最小化; 双击标题栏触发最小化, 按住可拖动. "
+            + "点击穿透开启后, 面板忽略除该按钮外的全部鼠标事件.",
+            "",
+            "清理按钮: 清理显存在任务执行中会延迟到任务结束后自动执行; "
+            + "清理内存始终立即生效, 即使任务执行中.",
+            "",
+            "状态栏: 语言 / 不透明度 (" + MIN_OPACITY + "-" + MAX_OPACITY + "%) / 刷新率 "
+            + "(0-" + RATE_MAX + " Hz, 0 = 暂停) / 鼠标位置 / 面板位置与尺寸.",
+            "设置项持久化到 ComfyUI 设置 (无 API 时回退 localStorage).",
+            "",
+            "本 ? 按钮: 单击复制本段帮助文本到剪贴板; 双击打开项目 GitHub 仓库: " + REPO_URL,
         ].join("\n"),
         langTip: "界面语言",
-        rateTip: "刷新率 (0-10 Hz, 0 = 暂停)",
-        opacityTip: "面板不透明度 (30-100%)",
+        rateTip: "刷新率 (0-" + RATE_MAX + " Hz, 0 = 暂停)",
+        opacityTip: "面板不透明度 (" + MIN_OPACITY + "-" + MAX_OPACITY + "%)",
         mouseTip: "鼠标位置",
         posTip: "面板位置",
         sizeTip: "面板尺寸",
@@ -522,6 +593,8 @@ const LANGS = {
         ramDesc: (b) => `内存 ${b}`,
         copied: (n) => `已复制: ${n}`,
         copiedFull: "已复制完整信息",
+        helpCopied: "帮助文本已复制到剪贴板",
+        helpCopyFail: "复制失败",
         freedRam: (b) => `已清理内存, 释放约 ${b} (估算)`,
         freedVram: (b) => `已清理显存, 释放约 ${b} (估算)`,
         queuedClean: "有任务正在执行, 将在任务结束后自动清理",
@@ -602,8 +675,14 @@ function escapeHtml(text) {
         .replaceAll('"', "&quot;");
 }
 
-// "#rrggbb" 颜色解析为 [r, g, b] 数值数组 (严格 7 位格式, 不接受缩写/RGBA), 供颜色插值运算
+// "#rrggbb" 颜色解析为 [r, g, b] 数值数组, 供颜色插值运算.
+// 兼容 8 位 "#rrggbbaa": alpha 段被忽略并输出警告 (插值仅支持不透明色),
+// 避免映射层误用带透明度色值时面板构造整体失败
 function hexRgb(hex) {
+    if (/^#[0-9a-fA-F]{8}$/.test(hex)) {
+        console.warn(`[comfyui_dynamic] hexRgb: alpha part ignored (interpolation needs opaque color): ${hex}`);
+        hex = hex.slice(0, 7);
+    }
     if (!/^#[0-9a-fA-F]{6}$/.test(hex))
         throw new Error(`invalid color: ${hex}`);
     return [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
@@ -734,6 +813,9 @@ const CSS = `
     color: var(--dynmon-foreground-panel); font-family: sans-serif; font-size: 12px; user-select: none; }
 .dynmon-panel.dynmon-min { min-width: 0; min-height: 0; max-width: none; max-height: none;
     width: auto !important; height: auto !important; resize: none; }
+/* 折叠后仅剩标题栏: 隐藏与主体间的分界线 (标题栏渐变循环仅内联写边框颜色,
+   不影响此处的宽度/样式, 故本规则在折叠期间始终生效) */
+.dynmon-panel.dynmon-min .dynmon-header { border-bottom: none; }
 .dynmon-header { display: flex; align-items: center; gap: 8px; padding: 6px 10px;
     background: var(--dynmon-background-header); border-bottom: 1px solid var(--dynmon-border-header); cursor: move; flex: none; white-space: nowrap; }
 .dynmon-title { font-weight: 600; font-size: 12px; }
@@ -744,6 +826,15 @@ const CSS = `
 .dynmon-hbtn { background: transparent; border: none; color: var(--dynmon-foreground-header-button); cursor: pointer;
     font-size: 13px; line-height: 1; padding: 2px 4px; }
 .dynmon-hbtn:hover { color: var(--dynmon-foreground-header-button-hover); }
+.dynmon-hbtn svg { display: block; }
+/* 标题栏状态图标 (主标题左侧): 常态继承标题文本色, 告警态切换为告警前景色 */
+.dynmon-hicon { display: inline-flex; align-items: center; flex: none; color: inherit; }
+.dynmon-hicon svg { display: block; }
+.dynmon-hicon.dynmon-hicon-alert { color: var(--dynmon-foreground-alert); }
+/* 点击穿透: 面板整体放行全部鼠标事件 (pointer-events: none 仅影响命中测试,
+   按钮事件仍可冒泡至面板监听器), 仅穿透切换按钮保留交互 */
+.dynmon-panel.dynmon-passthrough { pointer-events: none; }
+.dynmon-panel.dynmon-passthrough .dynmon-hbtn[data-hact="passthrough"] { pointer-events: auto; }
 .dynmon-hbtns { display: flex; align-items: center; gap: 2px; }
 .dynmon-hspring { flex: 1; }
 .dynmon-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
@@ -771,7 +862,12 @@ const CSS = `
 .dynmon-select { width: 120px; background: var(--dynmon-background-model-select); color: var(--dynmon-foreground-model-select); border: 1px solid var(--dynmon-border-model-select); }
 .dynmon-models { padding: 0 8px 8px; }
 .dynmon-loaded-sec { flex: 1 1 auto; min-height: 60px; display: flex; flex-direction: column; }
-.dynmon-unloaded-sec { flex: none; max-height: 45%; display: flex; flex-direction: column; }
+/* 已卸载区: 未展开/条目少时保持内容高度 (flex none, 已加载区 flex 1 1 auto 吃掉全部剩余空间);
+   条目多时封顶容器一半高度 (max-height 50%), 超出部分转入列表内部滚动,
+   顶部灰色分隔线增强与已加载列表的分界可读性 */
+.dynmon-unloaded-sec { flex: none; max-height: 50%; display: flex; flex-direction: column;
+    border-top: 1px solid var(--dynmon-border-unloaded-section-divider); }
+.dynmon-unloaded-sec .dynmon-list { flex: 0 1 auto; overflow-y: auto; min-height: 0; }
 .dynmon-sec-head { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--dynmon-foreground-section-header); padding: 2px; cursor: pointer; }
 .dynmon-sec-head:hover { color: var(--dynmon-foreground-section-header-hover); }
 .dynmon-chev { font-size: 9px; width: 10px; display: inline-block; transition: transform .15s; }
@@ -923,8 +1019,8 @@ function buildDetailText(m, t, isRemoved = false) {
 
 class MonitorPanel {
     constructor() {
-        this.lang = getSetting(SETTING_LANG, DEFAULT_LANG) === "zh" ? "zh" : "en";
-        this.rate = clamp(parseInt(getSetting(SETTING_RATE, DEFAULT_RATE), 10) || 0, 0, 10);
+        this.lang = getSetting(SETTING_ID__LANG, DEFAULT_LANG) === "zh" ? "zh" : "en";
+        this.rate = clamp(parseInt(getSetting(SETTING_ID__RATE, DEFAULT_RATE), 10) || 0, RATE_MIN, RATE_MAX);
         this.paused = this.rate === 0; // 初始刷新率为 0 时视为暂停态
         this.enabled = true;
         this.lastUpdated = -1e9;
@@ -937,11 +1033,15 @@ class MonitorPanel {
         this.modelsSignature = null;
         this.errorShown = false;
         this.statusTimer = null;
+        this.helpClickAt = 0;     // 帮助按钮上一次点击时刻 (双击判定, 见 handleHelpClick)
+        this.helpClickTimer = null; // 挂起的单击复制动作定时器
         this.minimized = false;  // 最小化状态 (显式初始化, 不依赖 undefined 隐式行为)
+        this.passthrough = false;       // 点击穿透开关 (开启时面板放行除切换按钮外的全部鼠标事件)
+        this.autoMinPrevDocked = false; // 弹窗触发自动最小化前的停靠状态 (关闭弹窗后完整还原用)
         this.savedSize = null;   // 最小化前的尺寸 { w, h }
         this.docked = false;     // 是否处于停靠模式 (左下角, 随窗口尺寸变化保持贴合)
         this.floatPos = null;    // 浮动状态坐标记忆 { left, top } (仅浮动态更新, 供退出停靠时恢复)
-        this.opacity = clamp(parseInt(getSetting(SETTING_OPACITY, DEFAULT_OPACITY), 10) || DEFAULT_OPACITY,
+        this.opacity = clamp(parseInt(getSetting(SETTING_ID__OPACITY, DEFAULT_OPACITY), 10) || DEFAULT_OPACITY,
             MIN_OPACITY, MAX_OPACITY); // 面板不透明度 (MIN_OPACITY - MAX_OPACITY %)
         this.autoMinimized = false; // 是否因对话框弹出而自动最小化 (关闭时自动还原)
         this.positioned = false; // 是否已用 left/top 定位 (初始用 right/bottom 锚定)
@@ -957,6 +1057,7 @@ class MonitorPanel {
         // 标题栏颜色状态机: 调用方只通过 setHdrTarget 发布目标色 (BackgroundColors 中 header*
         // 系列为 "#RRGGBB" 字符串, VSC 可预览), 初始时解析为数值; 渐变由统一循环插值
         // (State + Tween 模式: 目标值发布与渲染解耦, 单一 ticker 消费目标状态)
+        this.hdrApplied = false; // 稳态短路标志: 颜色已到位且目标未变时跳过每帧样式写入
         this.hdrCur = hexRgb(BackgroundColors.header);
         this.hdrFrom = this.hdrCur.slice();
         this.setHdrTarget(BackgroundColors.header, performance.now());
@@ -986,12 +1087,14 @@ class MonitorPanel {
         panel.className = "dynmon-panel";
         panel.innerHTML = `
             <div class="dynmon-header">
+                <span class="dynmon-hicon"></span>
                 <span class="dynmon-title"></span>
                 <span class="dynmon-subtitle"></span>
                 <span class="dynmon-alert"></span>
                 <span class="dynmon-hspring"></span>
                 <span class="dynmon-hbtns">
                     <button class="dynmon-hbtn" data-hact="help" title="">?</button>
+                    <button class="dynmon-hbtn" data-hact="passthrough" title=""></button>
                     <button class="dynmon-hbtn" data-hact="pause" title=""></button>
                     <button class="dynmon-hbtn" data-hact="reset" title="">↺</button>
                     <button class="dynmon-hbtn" data-hact="dock" title="">↙</button>
@@ -1037,13 +1140,13 @@ class MonitorPanel {
                         <option value="zh">中文</option>
                     </select>
                 </div>
-                <div class="dynmon-sb-item"><input class="dynmon-opacity" type="range" min="30" max="100" step="5"></div>
+                <div class="dynmon-sb-item"><input class="dynmon-opacity" type="range" min="${MIN_OPACITY}" max="${MAX_OPACITY}" step="5"></div>
                 <div class="dynmon-sb-item dynmon-rate-group">
                     <span class="dynmon-rate-stepper">
                         <button class="dynmon-rate-btn" data-rate="-1">-</button>
                         <button class="dynmon-rate-btn" data-rate="1">+</button>
                     </span>
-                    <input class="dynmon-rate-input" type="number" min="0" max="10" step="1">
+                    <input class="dynmon-rate-input" type="number" min="${RATE_MIN}" max="${RATE_MAX}" step="1">
                     <span>Hz</span>
                 </div>
                 <div class="dynmon-sb-item dynmon-sb-spring"></div>
@@ -1090,6 +1193,8 @@ class MonitorPanel {
         this.subtitleEl = panel.querySelector(".dynmon-subtitle");
         this.alertEl = panel.querySelector(".dynmon-alert");
         this.headerEl = panel.querySelector(".dynmon-header");
+        this.hiconEl = panel.querySelector(".dynmon-hicon");           // 主标题左侧状态图标
+        this.passthroughBtn = panel.querySelector('[data-hact="passthrough"]');
         // 下拉框占位项: 始终显示为选中文本, 不随选择改变
         this.linksSelect = panel.querySelector(".dynmon-links");
         this.dirsSelect = panel.querySelector(".dynmon-dirs");
@@ -1169,13 +1274,15 @@ class MonitorPanel {
             e.stopPropagation();
             const act = btn.dataset.hact;
             if (act === "help")
-                window.open(GITHUB_URL, "_blank", "noopener");
+                this.handleHelpClick();
             else if (act === "pause")
                 this.togglePause();
             else if (act === "reset")
                 this.resetLayout();
             else if (act === "dock")
                 this.toggleDock();
+            else if (act === "passthrough")
+                this.setPassthrough(!this.passthrough);
             else if (act === "min")
                 this.setMinimized(!this.minimized);
         });
@@ -1387,7 +1494,7 @@ class MonitorPanel {
         this.langSelect.value = this.lang;
         this.langSelect.addEventListener("change", () => {
             this.lang = this.langSelect.value === "zh" ? "zh" : "en";
-            setSetting(SETTING_LANG, this.lang);
+            setSetting(SETTING_ID__LANG, this.lang);
             this.applyI18n();
             this.refreshLayout(); // 轻量刷新: 强制回流 + 派生布局重算, 消除切换后的一次性位移
         });
@@ -1398,7 +1505,7 @@ class MonitorPanel {
             this.panel.style.opacity = `${this.opacity / 100}`;
         });
         this.opacityInput.addEventListener("change", () => {
-            setSetting(SETTING_OPACITY, this.opacity);
+            setSetting(SETTING_ID__OPACITY, this.opacity);
         });
 
         // 刷新率: +/- 按钮与直接输入 (暂停态点 + 解除暂停并置 1)
@@ -1597,8 +1704,11 @@ class MonitorPanel {
 
     applyI18n() {
         this.titleEl.textContent = this.t("title");
-        this.subtitleEl.textContent = this.t("subtitle");
+        this.syncSubtitle();   // 副标题受断连状态影响, 统一由该函数决定内容
+        this.syncHeaderIcon(); // 状态图标随告警状态切换
         this.syncPauseButton();
+        this.passthroughBtn.innerHTML = this.passthrough ? ICONS.pointer : ICONS.pointerOff;
+        this.passthroughBtn.title = this.t(this.passthrough ? "passthroughTipOn" : "passthroughTipOff");
         // 问号按钮不设原生 title: 避免原生提示约 1s 后弹出并遮挡自定义帮助弹窗
         this.resetBtn.title = this.t("resetTip");
         this.syncDockButton();
@@ -1669,12 +1779,12 @@ class MonitorPanel {
     }
 
     setRate(value) {
-        this.rate = clamp(parseInt(value, 10) || 0, 0, 10);
+        this.rate = clamp(parseInt(value, 10) || 0, RATE_MIN, RATE_MAX);
         // 统一 paused 语义: rate=0 即暂停态 (与初始加载 rate=0 时的状态一致)
         this.paused = this.rate === 0;
         this.syncRateDisplay();
         this.syncPauseButton();
-        setSetting(SETTING_RATE, this.rate);
+        setSetting(SETTING_ID__RATE, this.rate);
     }
 
     getPollIntervalMs() {
@@ -1704,9 +1814,10 @@ class MonitorPanel {
             return;
         const now = performance.now();
 
-        // 目标色优先级: 警告 > 最小化蓝色保持 (不回到默认, 展开才回) > 默认
+        // 目标色优先级: 警告 (指标告警或后端断连) > 最小化保持色 (当前与常规色相同,
+        // 闪红后回落, 展开前不参与告警/默认切换) > 默认
         let target = BackgroundColors.header;
-        if (this.alertReasons.length > 0)
+        if (this.alertReasons.length > 0 || this.errorShown)
             target = BackgroundColors.headerAlert;
         else if (this.minimized)
             target = BackgroundColors.headerMinimized;
@@ -1721,6 +1832,10 @@ class MonitorPanel {
         for (let i = 0; i < 3; i++)
             this.hdrCur[i] = Math.round(from[i] + (this.hdrTarget[i] - from[i]) * t);
 
+        // 稳态短路: 插值已到位且上一帧已写入相同颜色时, 跳过每帧无效样式写入
+        if (t >= 1 && this.hdrApplied)
+            return;
+        this.hdrApplied = t >= 1;
         const [r, g, b] = this.hdrCur;
         this.headerEl.style.backgroundColor = `rgb(${r}, ${g}, ${b})`;
         this.headerEl.style.borderBottomColor = `rgb(${Math.round(r * 0.6)}, ${Math.round(g * 0.6)}, ${Math.round(b * 0.6)})`;
@@ -1729,36 +1844,93 @@ class MonitorPanel {
     // 最小化瞬间: 当前色立即置 headerMinimizeFlash 红 (不渐变), 之后由 ticker 渐变为保持色
     flashMinimize() {
         this.hdrMinAt = performance.now();
+        this.hdrApplied = false; // 颜色瞬间跳变, 强制下一帧重写样式
         this.hdrCur = hexRgb(BackgroundColors.headerMinimizeFlash);
         this.setHdrTarget(BackgroundColors.headerMinimized, this.hdrMinAt);
     }
 
+    // ---------- 标题栏图标 / 副标题 / 点击穿透 ----------
+
+    // 标题栏状态图标随状态切换: 告警 (指标告警或后端断连) 时显示红色警告三角, 常态为仪表盘
+    syncHeaderIcon() {
+        const alert = this.alertReasons.length > 0 || this.errorShown;
+        this.hiconEl.innerHTML = alert ? ICONS.headerAlert : ICONS.headerGauge;
+        this.hiconEl.classList.toggle("dynmon-hicon-alert", alert);
+    }
+
+    // 副标题: 正常显示插件名, 后端断连时替换为断连提示 (恢复后由 applyStats 还原)
+    syncSubtitle() {
+        this.subtitleEl.textContent = this.errorShown ? this.t("backendDown") : this.t("subtitle");
+    }
+
+    // 点击穿透开关: 面板整体 pointer-events: none, 仅本按钮保留交互 (见 CSS .dynmon-passthrough).
+    // 事件冒泡不受 pointer-events 影响 (其只作用于命中测试), 面板级点击监听器照常工作;
+    // 穿透期间拖动/双击/其余按钮均失效, 属预期行为. 开关为运行时状态, 不做持久化
+    setPassthrough(on) {
+        this.passthrough = on;
+        this.panel.classList.toggle("dynmon-passthrough", on);
+        this.passthroughBtn.innerHTML = on ? ICONS.pointer : ICONS.pointerOff;
+        this.passthroughBtn.title = this.t(on ? "passthroughTipOn" : "passthroughTipOff");
+    }
+
+    // ---------- 帮助按钮: 单击复制 / 双击打开仓库 ----------
+
+    // 单击/双击分派: 自定义双击判定, 复用标题栏状态机的 DRAG_DBL_MS 窗口常量.
+    // 首次点击后挂起单击动作至窗口结束; 窗口内出现第二次点击则取消单击并执行双击动作.
+    // 悬浮提示 (helpText 预览) 由 mouseenter 独立处理, 与点击分派互不影响
+    handleHelpClick() {
+        const now = performance.now();
+        if (now - this.helpClickAt < DRAG_DBL_MS) {
+            // 双击: 取消挂起的单击复制, 打开项目仓库
+            clearTimeout(this.helpClickTimer);
+            this.helpClickAt = 0;
+            this.helpClickTimer = null;
+            window.open(REPO_URL, "_blank", "noopener");
+            return;
+        }
+        this.helpClickAt = now;
+        clearTimeout(this.helpClickTimer);
+        this.helpClickTimer = setTimeout(() => {
+            this.helpClickAt = 0;
+            this.helpClickTimer = null;
+            this.copyHelpText();
+        }, DRAG_DBL_MS);
+    }
+
+    // 复制帮助文本到剪贴板 (与悬浮提示显示的内容一致), 复用全局 copyText 封装
+    copyHelpText() {
+        copyText(this.t("helpText"),
+            () => this.flash(this.t("helpCopied")),
+            () => this.flash(this.t("helpCopyFail"), true));
+    }
+
     // ---------- 警告计算 ----------
 
-    // 依据快照计算警告原因: 任一温度 > 90 C / 显存剩余极小 / 内存剩余 < 10%
+    // 依据快照计算警告原因: 任一温度超 ALERT_TEMP_C / 显存告急 / 内存剩余低于 RAM_MIN_FREE_FRACTION
     computeAlerts(data) {
         const reasons = [];
         const hot = [];
         const cpuT = data.cpu?.temp;
-        if (cpuT != null && cpuT > 90)
+        if (cpuT != null && cpuT > ALERT_TEMP_C)
             hot.push(`CPU ${round1(cpuT)}`);
         const gpuT = data.devices?.[0]?.temperature;
-        if (gpuT != null && gpuT > 90)
+        if (gpuT != null && gpuT > ALERT_TEMP_C)
             hot.push(`GPU ${round1(gpuT)}`);
         if (hot.length)
             reasons.push(this.t("alertTemp", hot.join(", ")));
 
         const d = data.devices?.[0];
-        if (d?.vram_total > 0) {
-            // 显存溢出判定: 剩余 <= max(总量的 2%, 512 MB) 视为告急
+        // 显存告急仅对真实 GPU 设备判定 (CPU 设备的显存口径实为系统内存, 避免与 RAM 告警重复)
+        if (d?.type === "cuda" && d.vram_total > 0) {
+            // 显存溢出判定: 剩余 <= max(总量的 VRAM_MIN_FREE_FRACTION, VRAM_MIN_FREE_BYTES) 视为告急
             const free = d.vram_total - d.vram_used;
-            const minFree = Math.max(d.vram_total * 0.02, 512 * 1024 * 1024);
+            const minFree = Math.max(d.vram_total * VRAM_MIN_FREE_FRACTION, VRAM_MIN_FREE_BYTES);
             if (free <= minFree)
                 reasons.push(this.t("alertVram", fmtBytes(free)));
         }
 
         const ram = data.ram;
-        if (ram?.total > 0 && ram.available / ram.total < 0.10)
+        if (ram?.total > 0 && ram.available / ram.total < RAM_MIN_FREE_FRACTION)
             reasons.push(this.t("alertRam", fmtBytes(ram.available)));
         return reasons;
     }
@@ -1781,6 +1953,8 @@ class MonitorPanel {
             return;
         this.errorShown = true;
         this.flash(this.t("backendError"), true);
+        this.syncSubtitle();   // 副标题切换为断连提示
+        this.syncHeaderIcon(); // 图标切换为警告三角, 标题栏转入红色警告
     }
 
     // ---------- 数据应用 ----------
@@ -1789,12 +1963,16 @@ class MonitorPanel {
         this.errorShown = false;
         this.busy = !!data.busy;
         this.panel.classList.toggle("dynmon-busy", this.busy);
-        this.primaryVram = data.devices?.[0]?.vram_total || 0;
+        // 体积占比条的基准: 仅真实 GPU 显存可用 (CPU 设备口径为系统内存, 回退 0)
+        const primary0 = data.devices?.[0];
+        this.primaryVram = primary0 && primary0.type === "cuda" ? (primary0.vram_total || 0) : 0;
 
         // 警告状态: 更新原因列表 (驱动标题栏红色与警告次标题)
         this.alertReasons = this.computeAlerts(data);
         this.alertEl.textContent = this.alertReasons.join("; ");
         this.alertEl.title = this.alertReasons.join("\n");
+        this.syncSubtitle();   // 后端已恢复: 副标题还原为插件名
+        this.syncHeaderIcon(); // 图标随告警状态切换
 
         const primary = data.devices?.[0];
         const sample = {
@@ -1829,11 +2007,14 @@ class MonitorPanel {
     updateCards(data, primary) {
         this.lastCpuCores = data.cpu?.cores ?? null;
         this.lastGpuName = primary?.name || "";
+        // 主设备是否为真实 GPU: CPU 设备的 "显存" 口径实为系统内存, 相关卡片按无 GPU 展示
+        const hasCuda = !!primary && primary.type === "cuda";
         for (const c of CARDS) {
             const ref = this.cardRefs[c.key];
             const percent = c.pct(data);
-            // 温度卡: 100 C = 100%
-            const barPercent = percent != null ? clamp(percent, 0, 100) : null;
+            // 占用条满量程: 常规卡 100%, 温度卡 TEMP_CARD_MAX_C (c.max 指定)
+            const fullScale = c.max ?? 100;
+            const barPercent = percent != null ? clamp(percent / fullScale * 100, 0, 100) : null;
 
             if (c.key === "cpu") {
                 ref.value.textContent = `${sampleFmt(percent)}%`;
@@ -1845,18 +2026,19 @@ class MonitorPanel {
                 ref.sub.textContent = ramSub;
             } else if (c.key === "gpu") {
                 ref.value.textContent = percent != null ? `${sampleFmt(percent)}%` : "-";
-                ref.sub.textContent = primary ? (primary.name || "") : this.t("noGpu");
+                ref.sub.textContent = hasCuda ? (primary.name || "") : this.t("noGpu");
             } else if (c.key === "vram") {
-                ref.value.textContent = `${sampleFmt(percent)}%`;
-                ref.sub.textContent = primary
+                ref.value.textContent = hasCuda && percent != null ? `${sampleFmt(percent)}%` : "-";
+                ref.sub.textContent = hasCuda
                     ? `${fmtBytes(primary.vram_used)} / ${fmtBytes(primary.vram_total)}`
                     : "-";
             } else if (c.key === "cpu_temp") {
                 ref.value.textContent = percent != null ? `${sampleFmt(percent)}` : "-";
                 ref.sub.textContent = percent != null ? "C" : "";
             } else if (c.key === "gpu_temp") {
-                ref.value.textContent = percent != null ? `${sampleFmt(percent)}` : "-";
-                ref.sub.textContent = percent != null ? "C" : (primary ? "" : this.t("noGpu"));
+                ref.value.textContent = hasCuda && percent != null ? `${sampleFmt(percent)}` : "-";
+                ref.sub.textContent = hasCuda && percent != null ? "C"
+                    : (hasCuda ? "" : this.t("noGpu"));
             }
 
             ref.bar.style.width = `${barPercent ?? 0}%`;
@@ -2185,12 +2367,13 @@ class MonitorPanel {
                 if (r.ok) {
                     this.flash(this.t("unloaded", m.filename || m.class));
                 } else {
-                    const msg = r.reason === "ram_only" ? this.t("unloadRamMsg")
-                        : r.reason === "still_resident"
-                            ? this.t("unloadStillMsg", fmtBytes(r.freed || 0))
-                            : r.reason === "not_found"
-                                ? this.t("unloadNotFoundMsg")
-                                : this.t("unloadFail", r.message || r.reason);
+                    const msg = r.reason === "busy" ? this.t("busyUnloadHttp")
+                        : r.reason === "ram_only" ? this.t("unloadRamMsg")
+                            : r.reason === "still_resident"
+                                ? this.t("unloadStillMsg", fmtBytes(r.freed || 0))
+                                : r.reason === "not_found"
+                                    ? this.t("unloadNotFoundMsg")
+                                    : this.t("unloadFail", r.message || r.reason);
                     this.flash(msg, true);
                 }
                 scheduleRefresh();
@@ -2318,33 +2501,81 @@ let panel = null;
 let heartbeatId = null;
 let fetchBusy = false;
 let refreshTimer = null;
+let fetchFailStreak = 0; // 轮询连续失败计数 (达到阈值后退避, 成功后清零)
+
+// 设置热更新: 在 CUI 设置对话框中修改的三项于心跳中比对生效 (enabled 已单独处理).
+// 比较基准是上次心跳读到的设置存储值 (缓存), 而非面板运行时状态:
+// 面板控件的持久化时机晚于实时应用 (如透明度在 input 实时生效, change 松手才写设置),
+// 若直接与面板状态比较, 心跳会把拖动中的临时状态回滚为旧设置值并重写把手, 造成闪烁;
+// 以设置存储值自身的变化为触发, 拖动中的临时差异不会被误判为外部修改.
+// 位于最小化短路之前: 弹窗自动最小化期间 (用户正操作设置对话框) 修改同样即时可见
+const hotSettingsCache = { rate: null, lang: null, opacity: null };
+
+function syncSettingsHot() {
+    const rateSetting = getSetting(SETTING_ID__RATE, DEFAULT_RATE);
+    if (rateSetting !== hotSettingsCache.rate) {
+        hotSettingsCache.rate = rateSetting;
+        const rate = clamp(parseInt(rateSetting, 10) || 0, RATE_MIN, RATE_MAX);
+        if (rate !== panel.rate)
+            panel.setRate(rate); // 内部会回写一次相同设置值, 无副作用
+    }
+
+    const langSetting = getSetting(SETTING_ID__LANG, DEFAULT_LANG);
+    if (langSetting !== hotSettingsCache.lang) {
+        hotSettingsCache.lang = langSetting;
+        const lang = langSetting === "zh" ? "zh" : "en";
+        if (lang !== panel.lang) {
+            panel.lang = lang;
+            panel.langSelect.value = lang;
+            panel.applyI18n();
+            panel.refreshLayout();
+        }
+    }
+
+    const opacitySetting = getSetting(SETTING_ID__OPACITY, DEFAULT_OPACITY);
+    if (opacitySetting !== hotSettingsCache.opacity) {
+        hotSettingsCache.opacity = opacitySetting;
+        const opacity = clamp(parseInt(opacitySetting, 10) || DEFAULT_OPACITY, MIN_OPACITY, MAX_OPACITY);
+        if (opacity !== panel.opacity) {
+            panel.opacity = opacity;
+            panel.applyOpacity();
+        }
+    }
+}
 
 function heartbeatTick() {
     if (!panel)
         return;
     processDialogState(); // 对话框开关轮询: 自动最小化/还原 (不依赖 DOM 突变事件)
     // 启用开关: 每次心跳读取全局设置 (读取开销可忽略), 关闭时隐藏面板并停止取数
-    const enabled = getSetting(SETTING_ENABLE, true) !== false;
+    const enabled = getSetting(SETTING_ID__ENABLE, true) !== false;
     if (enabled !== panel.enabled) {
         panel.enabled = enabled;
         panel.panel.style.display = enabled ? "" : "none";
     }
+    syncSettingsHot(); // 刷新率 / 语言 / 透明度热更新
     if (!panel.enabled)
         return;
     if (panel.minimized)
         return; // 最小化时不刷新 (展开后由下一次心跳立即恢复)
 
     const now = performance.now();
-    const interval = panel.getPollIntervalMs();
+    // 有效间隔: 连续失败达到阈值后退避到 FETCH_FAIL_BACKOFF_MS,
+    // 避免后端不可达时仍按用户配置频率 (最高 10 Hz) 无限空敲死端口;
+    // 暂停态 getPollIntervalMs 返回 Infinity, 与退避取 max 后保持暂停语义
+    const interval = Math.max(panel.getPollIntervalMs(),
+        fetchFailStreak >= FETCH_FAIL_STREAK_THRESHOLD ? FETCH_FAIL_BACKOFF_MS : 0);
     if (fetchBusy || now - panel.lastUpdated < interval - 40)
         return;
     fetchBusy = true;
     fetchStats()
         .then(data => {
+            fetchFailStreak = 0;
             panel.applyStats(data);
             panel.lastUpdated = performance.now();
         })
         .catch(() => {
+            fetchFailStreak++;
             panel.onError();
             panel.lastUpdated = now; // 避免失败后以极高频率重试
         })
@@ -2361,6 +2592,7 @@ function scheduleRefresh() {
             return;
         try {
             const data = await fetchStats();
+            fetchFailStreak = 0; // 主动刷新成功同样视为恢复, 复位退避计数
             panel.applyStats(data);
             panel.lastUpdated = performance.now();
         } catch {
@@ -2377,8 +2609,8 @@ function scheduleRefresh() {
 // 误触发防护: role="dialog" 可能命中小型浮层 (下拉列表等), 尺寸超过阈值才视为大面积弹窗;
 // 旧类名本身即模态容器, 不做尺寸过滤.
 const DIALOG_SELS = '[role="dialog"], .comfy-modal, .comfy-settings, .p-dialog';
-const DIALOG_MIN_W = 400; // role=dialog 误触发防护: 最小宽度 (px)
-const DIALOG_MIN_H = 300; // role=dialog 误触发防护: 最小高度 (px)
+const DIALOG_MIN_W = 200; // role=dialog 误触发防护: 最小宽度 (px)
+const DIALOG_MIN_H = 100; // role=dialog 误触发防护: 最小高度 (px)
 
 function processDialogState() {
     if (!panel)
@@ -2388,12 +2620,17 @@ function processDialogState() {
             && (el.getAttribute("role") !== "dialog"
                 || (el.offsetWidth > DIALOG_MIN_W && el.offsetHeight > DIALOG_MIN_H)));
     if (open && !panel.minimized) {
+        panel.autoMinPrevDocked = panel.docked; // 记录最小化前停靠状态, 关闭后完整还原
         panel.autoMinimized = true;
         panel.setMinimized(true);
     } else if (!open && panel.autoMinimized) {
         panel.autoMinimized = false;
         if (panel.minimized)
             panel.setMinimized(false);
+        // 完整还原: 最小化前为浮动时, setMinimized 展开路径会保持停靠,
+        // 此处退回原浮动位置 (floatPos 在最小化期间未被触碰, 位置记忆仍有效)
+        if (!panel.autoMinPrevDocked && panel.docked)
+            panel.exitDock(true);
     }
 }
 
@@ -2402,37 +2639,41 @@ function processDialogState() {
 // 扩展接入
 // ============================================================
 
+const name__plugin = "Comfy Dynamic"
+const title__settings = "Control Panel"
+
 app.registerExtension({
     name: "dynamic.resource_monitor",
     settings: [
         {
-            id: SETTING_ENABLE,
+            id: SETTING_ID__ENABLE,
             name: "Dynamic Resource Monitor: Enabled",
             type: "boolean",
             defaultValue: true,
-            category: ["Dynamic", "Resource Monitor"],
+            // 注意类别列表必须有三个元素, 两个值无法注册
+            category: [name__plugin, title__settings, SETTING_ID__ENABLE],
         },
         {
-            id: SETTING_RATE,
+            id: SETTING_ID__RATE,
             name: "Dynamic Resource Monitor: Refresh rate (Hz, 0 = paused)",
             type: "number",
             defaultValue: DEFAULT_RATE,
-            category: ["Dynamic", "Resource Monitor"],
+            category: [name__plugin, title__settings, SETTING_ID__RATE],
         },
         {
-            id: SETTING_LANG,
+            id: SETTING_ID__LANG,
             name: "Dynamic Resource Monitor: Language",
             type: "combo",
             options: ["en", "zh"],
             defaultValue: DEFAULT_LANG,
-            category: ["Dynamic", "Resource Monitor"],
+            category: [name__plugin, title__settings, SETTING_ID__LANG],
         },
         {
-            id: SETTING_OPACITY,
+            id: SETTING_ID__OPACITY,
             name: "Dynamic Resource Monitor: Panel opacity (30-100%)",
             type: "number",
             defaultValue: DEFAULT_OPACITY,
-            category: ["Dynamic", "Resource Monitor"],
+            category: [name__plugin, title__settings, SETTING_ID__OPACITY],
         },
     ],
     async setup() {
