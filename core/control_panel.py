@@ -111,8 +111,8 @@ _start_cpu_temp_thread()
 MAX_UNLOADED_RECORDS = 100
 
 _model_track_lock = threading.Lock()
-_known_models: dict[str, dict] = {}   # uuid -> 最近一次快照中的模型条目 (含 loaded_at)
-_unloaded_models: list[dict] = []     # 新在前, 条目含 unloaded_at
+_known_models: dict[str, dict] = {}  # uuid -> 最近一次快照中的模型条目 (含 loaded_at)
+_unloaded_models: list[dict] = []  # 新在前, 条目含 unloaded_at
 
 
 def _update_model_tracking(models: list[dict]) -> None:
@@ -133,7 +133,9 @@ def _update_model_tracking(models: list[dict]) -> None:
         if current:
             alive_uuids = {m["uuid"] for m in _unloaded_models}
             alive_uuids -= set(current.keys())
-            _unloaded_models[:] = [m for m in _unloaded_models if m["uuid"] in alive_uuids]
+            _unloaded_models[:] = [
+                m for m in _unloaded_models if m["uuid"] in alive_uuids
+            ]
 
         del _unloaded_models[MAX_UNLOADED_RECORDS:]
         _known_models.clear()
@@ -256,7 +258,9 @@ def _scan_model_residency(inner) -> tuple[int, str | None]:
     if not dev_bytes:
         return 0, None
     main_dev = max(dev_bytes.items(), key=lambda kv: kv[1])[0]
-    gpu_bytes = sum(v for k, v in dev_bytes.items() if k.split(":")[0] not in ("cpu", "meta"))
+    gpu_bytes = sum(
+        v for k, v in dev_bytes.items() if k.split(":")[0] not in ("cpu", "meta")
+    )
     return gpu_bytes, main_dev
 
 
@@ -392,7 +396,7 @@ def _cpu_temperature() -> float | None:
     2. LibreHardwareMonitor 的 WMI 命名空间 (需前台运行 LHM, 部分 ComfyUI 便携包自带);
     3. OpenHardwareMonitor 的 WMI 命名空间 (同上, 旧版工具);
     4. ACPI 热区温度 (root/wmi MSAcpi_ThermalZoneTemperature, Windows 内置可用,
-       但反映的是主板热区而非 CPU 核心温度, 精度有限, 仅兜底).
+        但反映的是主板热区而非 CPU 核心温度, 精度有限, 仅兜底).
 
     WMI 查询通过 PowerShell 子进程, 耗时秒级, 因此 Windows 下的查询在后台线程
     中周期执行并缓存结果, 快照构建只读缓存, 不阻塞.
@@ -400,9 +404,8 @@ def _cpu_temperature() -> float | None:
     if platform.system() != "Windows":
         return _cpu_temp_psutil()
 
-    cached = _cpu_temp_cache.get("value")
-    # 缓存超过 TTL (后台线程停止刷新) 时标记为过期, 但仍返回旧值避免跳变
-    return cached if cached is not None else None
+    # 直接返回后台线程维护的缓存值 (线程停止刷新时返回旧值, 避免跳变)
+    return _cpu_temp_cache.get("value")
 
 
 def _cpu_temp_psutil() -> float | None:
@@ -517,16 +520,12 @@ def _build_snapshot() -> dict:
     }
 
 
-def get_snapshot(force: bool = False) -> dict:
+def get_snapshot() -> dict:
     """获取监控快照, TTL 内直接返回缓存 (多标签页共享)."""
     global _snapshot_cache, _snapshot_time
     now = time.monotonic()
     with _snapshot_lock:
-        if (
-            not force
-            and _snapshot_cache is not None
-            and (now - _snapshot_time) < SNAPSHOT_TTL
-        ):
+        if _snapshot_cache is not None and (now - _snapshot_time) < SNAPSHOT_TTL:
             return _snapshot_cache
         snapshot = _build_snapshot()
         _update_model_tracking(snapshot["models"])
@@ -571,9 +570,11 @@ def _cleanup_vram() -> dict:
     return {"freed": max(0, before - _primary_vram_used())}
 
 
-# Win32 常量: 当前进程伪句柄与全访问权限
+# Win32 常量: 当前进程伪句柄, EmptyWorkingSet 所需全访问权限, 以及
+# SetSystemFileCacheSize 的 flush 哨兵值 (SIZE_MAX, 恰与伪句柄同为 -1 但语义无关)
 _WIN_CURRENT_PROCESS = -1
 _WIN_PROCESS_ALL_ACCESS = 0x001F0FFF
+_WIN_CACHE_FLUSH_SENTINEL = -1  # 传入 SIZE_MAX 表示清空全部系统文件缓存
 
 
 def _win_trim_own_working_set() -> None:
@@ -596,8 +597,8 @@ def _win_trim_system_file_cache() -> None:
 
     try:
         ctypes.windll.kernel32.SetSystemFileCacheSize(
-            ctypes.c_size_t(_WIN_CURRENT_PROCESS),
-            ctypes.c_size_t(_WIN_CURRENT_PROCESS),
+            ctypes.c_size_t(_WIN_CACHE_FLUSH_SENTINEL),
+            ctypes.c_size_t(_WIN_CACHE_FLUSH_SENTINEL),
             ctypes.c_uint(0),
         )
     except Exception:
@@ -735,14 +736,16 @@ def _unload_by_uuid(uuid_str: str) -> dict:
 
     # 条目仍在: 检查显存驻留, 区分 "本就在内存" 与 "卸载失败"
     try:
-        vram_after = _vram_resident_bytes(
-            patcher2, getattr(patcher2, "model", None)
-        )[0]
+        vram_after = _vram_resident_bytes(patcher2, getattr(patcher2, "model", None))[0]
     except Exception:
         vram_after = vram_before
     if vram_after <= 0:
         return {"ok": False, "reason": "ram_only", "freed": 0}
-    return {"ok": False, "reason": "still_resident", "freed": max(0, vram_before - vram_after)}
+    return {
+        "ok": False,
+        "reason": "still_resident",
+        "freed": max(0, vram_before - vram_after),
+    }
 
 
 def _open_in_explorer(path: str) -> None:
@@ -795,8 +798,10 @@ def register_monitor_routes() -> None:
 
     @routes.get(f"{API_PREFIX}/stats")
     async def monitor_stats(request):
+        # 快照构建含逐 tensor 的参数扫描, 大模型场景可能耗时数十 ms 以上,
+        # 放入线程池执行以免阻塞 aiohttp 事件循环 (与 free/unload 端点一致)
         try:
-            return web.json_response(get_snapshot())
+            return web.json_response(await asyncio.to_thread(get_snapshot))
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
 
@@ -845,9 +850,7 @@ def register_monitor_routes() -> None:
 
         _, patcher = _find_loaded_by_uuid(uuid_str)
         if patcher is None:
-            return web.json_response(
-                {"ok": False, "reason": "not_found"}, status=404
-            )
+            return web.json_response({"ok": False, "reason": "not_found"}, status=404)
         if _is_busy():
             return web.json_response({"ok": False, "reason": "busy"}, status=409)
 

@@ -5,7 +5,6 @@
 from comfy_api.latest import ComfyExtension, io
 
 
-from .core.resource_monitor import register_monitor_routes
 from .nodes.dynamic_load_text_node import DynamicLoadTextFileNode
 from .nodes.dynamic_none_node import DynamicNoneNode
 from .nodes.dynamic_pipe_any_node import DynamicPipeAnyNode
@@ -48,13 +47,17 @@ NODE_CLASS_MAPPINGS = {
     DynamicUniversalSelector.__name__: DynamicUniversalSelector,
 }
 
-# 注册资源监控服务的 HTTP 端点 (PromptServer 未就绪时内部会静默跳过)
+# 注册资源监控服务的 HTTP 端点 (PromptServer 未就绪时内部会静默跳过).
+# 模块导入一并纳入保护: 监控依赖 (psutil 等) 缺失时仅监控功能不可用,
+# 不拖垮其余节点加载
 try:
+    from .core.control_panel import register_monitor_routes
+
     register_monitor_routes()
-except Exception as e:  # 端点注册失败不应阻塞整个插件加载
+except Exception as e:  # 监控功能失效不应阻塞整个插件加载
     import logging
 
-    logging.warning(f"[comfyui_dynamic] monitor routes registration failed: {e}")
+    logging.warning(f"[comfyui_dynamic] monitor module load failed: {e}")
 
 
 __all__ = [

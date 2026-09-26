@@ -1,12 +1,13 @@
 // js/resource_monitor.js
 // 资源监控浮动面板 (无节点, 纯前端扩展):
-// - fixed 悬浮层: 标题栏 (拖动 / 暂停 / 重置+停靠 / 停靠左下 / 最小化, 双击最小化) +
-//   内容区 (6 统计卡片 / 折线图 / 模型列表) + 底部状态栏 (语言 / 刷新率 / 消息 / 坐标 / 位置 / 尺寸)
+// - fixed 悬浮层: 标题栏 (拖动 / 暂停 / 重置 / 停靠切换 / 最小化, 双击最小化) +
+//   内容区 (6 统计卡片 / 折线图 / 模型列表) + 消息行 + 底部状态栏 (语言 / 透明度 / 刷新率 / 坐标 / 位置 / 尺寸)
 // - 卡片: 占用超 50% 后背景与描边向告警色线性渐变; 温度卡以 100 C 为 100%
 // - 模型列表行: 状态配色 + 体积/已加载占比条 + 图标按钮 (复制/打开/卸载)
 // - 按钮行: 清理按钮 + 全进程 + 快捷链接下拉 + 本地目录下拉
-// - 刷新率 (0-10 Hz, 0 = 暂停) / 语言 / 启用开关经 ComfyUI settings 持久化 (localStorage 兜底)
+// - 刷新率 (0-10 Hz, 0 = 暂停) / 语言 / 透明度 / 启用开关经 ComfyUI settings 持久化 (localStorage 兜底)
 // - 打开 ComfyUI 设置/模板等对话框时自动最小化, 关闭后自动还原
+// - 停靠模式: 贴附左下角并随窗口尺寸变化保持贴合; 仅浮动态实时记忆坐标, 退出停靠时恢复
 import { app } from "../../scripts/app.js";
 
 
@@ -16,10 +17,17 @@ const MAX_POINTS = 180; // 折线图历史点数 (10 Hz 下约 18 s 窗口)
 const DEFAULT_RATE = 2; // 刷新率默认值 (Hz)
 const DEFAULT_LANG = "en";
 
-// 面板默认尺寸 (px) 与停靠边距
-const DEFAULT_W = 380;
-const DEFAULT_H = 560;
-const DOCK_MARGIN = 10;
+const DEFAULT_OPACITY = 100; // 面板不透明度默认值 (%)
+const MIN_OPACITY = 30;      // 面板不透明度下限 (%)
+const MAX_OPACITY = 100;     // 面板不透明度上限 (%)
+
+// 面板默认尺寸 (px)
+const DEFAULT_W = 400;
+const DEFAULT_H = 600;
+
+// 停靠模式专用偏移 (px): 水平 = 左侧栏探测宽度基础上的余量, 垂直 = 距窗口底部的距离
+const DOCK_OFFSET_X = 8;
+const DOCK_OFFSET_Y = 10;
 
 // 窗口边缘安全边距 (拖动夹取用)
 const EDGE = 8;
@@ -27,31 +35,234 @@ const EDGE = 8;
 // 左侧边栏宽度探测失败时的兜底值 (px), 避免停靠时挡住 CUI 左侧栏
 const FALLBACK_SIDEBAR = 56;
 
+// 标题栏拖动 / 双击状态机参数 (见 MonitorPanel 标题栏 pointerdown 状态机)
+const DRAG_MOVE_PX = 2;  // 拖动位移阈值 (px): 位移超过此值 (不含) 才进入拖动, 按下时相对位置全程保持
+const DRAG_DBL_MS = 150; // 双击判定窗口 (ms): 相邻两次按下间隔小于此值视为双击 (按下时触发)
+
 // 卡片告警渐变: 占用超过阈值后, t = (p - 阈值) / (100 - 阈值) 线性混入告警色
 const WARN_THRESHOLD = 50;
-const CARD_WARN_BG = [0x66, 0x00, 0x00];
-const CARD_WARN_BORDER = [0xCC, 0x00, 0x00];
-const CARD_BASE_BG = [0x23, 0x23, 0x23]; // 与 CSS 中 .dynmon-card 背景一致
-const CARD_BASE_BORDER = [0x38, 0x38, 0x38]; // 与 CSS 中 .dynmon-card 描边一致
 
-// 模型列表行状态配色 (背景 + 边框): used = 正在被使用, 基础色 = 空闲
-const ROW_USED_BG = [0x14, 0x28, 0x1C];
-const ROW_USED_BORDER = [0x2E, 0xA0, 0x43];
-const ROW_BASE_BG = [0x23, 0x23, 0x23];
-const ROW_BASE_BORDER = [0x38, 0x38, 0x38];
+// ============================================================
+// 颜色系统 (两层): 颜色层在上, 映射层在下, 调色时两处对照编辑
+// - 颜色层 RawColors: 项目内全部原始颜色, 全文件唯一允许颜色字面量的位置
+//   命名: <色相>__<hex>, hex 为去掉 # 的完整色值 (字母小写, 带透明度为 8 位);
+//   值统一为 "#rrggbb" / "#rrggbbaa" 大写形式 (VSC 可直接预览色块)
+// - 映射层: 每个 UI 原子元素一项, 只允许引用颜色层 (禁止出现字面量)
+//   key 为 camelCase 并与使用位置对应, injectStyle 注入时派生为
+//   --dynmon-<组前缀>-<kebab-case>; CSS 经 var() 引用, JS 直接 类名.属性 引用
+// ============================================================
 
-// 模型体积占比条配色 (RGBA: 需要一定透明度与状态底色叠加)
-const BAR_MODEL_COLOR = "rgba(88, 166, 255, 0.45)";  // 蓝色: 模型总体积
-const BAR_LOADED_COLOR = "rgba(248, 81, 73, 0.55)";  // 红色: 已加载进显存的部分
+// ---------- 颜色层 ----------
+class RawColors {
+    // 灰阶 (由暗到亮)
+    static black__000000 = "#000000";
+    static black__00000080 = "#00000080"; // 50% 透明黑 (阴影基色)
+    static grey__111111 = "#111111";
+    static grey__222222 = "#222222";
+    static grey__333333 = "#333333";
+    static grey__444444 = "#444444";
+    static grey__666666 = "#666666";
+    static grey__777777 = "#777777";
+    static grey__888888 = "#888888";
+    static grey__999999 = "#999999";
+    static grey__aaaaaa = "#AAAAAA";
+    static grey__bbbbbb = "#BBBBBB";
+    static grey__cccccc = "#CCCCCC";
+    static grey__dddddd = "#DDDDDD";
+    static grey__e0e0e0 = "#E0E0E0";
+    static white__ffffff = "#FFFFFF";
+    static white__ffffff0f = "#FFFFFF0F"; // 6% 透明白 (折线图网格线)
+    // 红
+    static red__660000 = "#660000";
+    static red__a04040 = "#A04040";
+    static red__cc0000 = "#CC0000";
+    static red__ff6666 = "#FF6666";
+    static red__ff66668c = "#FF66668C"; // 55% 透明红 (占比条已加载段)
+    static red__ff6b6b = "#FF6B6B";
+    static red__f87171 = "#F87171";
+    // 绿
+    static green__12331c = "#12331C";
+    static green__14281c = "#14281C";
+    static green__2ea043 = "#2EA043";
+    static green__66ff66 = "#66FF66";
+    // 蓝
+    static blue__14314a = "#14314A";
+    static blue__2d3a4dcc = "#2D3A4DCC"; // 80% 透明蓝灰 (类名徽章底)
+    static blue__66ccff = "#66CCFF";
+    static blue__66ccff73 = "#66CCFF73"; // 45% 透明蓝 (占比条模型段)
+    static blue__7aa2f7 = "#7AA2F7";
+    static blue__9ec1e8 = "#9EC1E8";
+    // 黄 / 橙
+    static yellow__4a3b12 = "#4A3B12";
+    static yellow__d29922 = "#D29922";
+    static orange__bc4c00 = "#BC4C00";
+    static orange__e36209 = "#E36209";
+}
+Object.freeze(RawColors);
 
-// 标题栏颜色状态机 (见 MonitorPanel.initHeaderFx): 调用方只设置目标色, 渐变由统一循环插值
-const HEADER_DEFAULT = [0x2A, 0x2A, 0x2A];   // 常规 (与 CSS .dynmon-header 背景一致)
-const HEADER_ALERT = [0xAA, 0x14, 0x14];     // 警告 (温度超限 / 显存或内存告急)
-const HEADER_FLASH = [0x1E, 0x5A, 0xC8];     // 最小化提示 (瞬时红色渐变为蓝色)
-const HEADER_FADE_MS = 1000;                 // 目标色渐变时长 (ms)
-const HEADER_FADE_FAST_MS = 400;             // 非闪动场景的渐变时长
+// ---------- 映射层: 文本 / 前景 ----------
+class ForegroundColors {
+    // 面板 / 标题栏
+    static panel = RawColors.grey__cccccc;              // .dynmon-panel 默认文本 (标题/卡片数值等继承)
+    static subtitle = RawColors.grey__999999;           // .dynmon-subtitle 标题栏副标题
+    static headerButton = RawColors.grey__888888;       // .dynmon-hbtn 标题栏按钮常态
+    static headerButtonHover = RawColors.white__ffffff; // .dynmon-hbtn:hover 标题栏按钮悬停
+    static alert = RawColors.red__ff6b6b;               // .dynmon-alert 标题栏告警文本
+    // 指标卡片区
+    static cardLabel = RawColors.grey__888888;          // .dynmon-card-label 卡片标签
+    static cardSub = RawColors.grey__777777;            // .dynmon-card-sub 卡片副行
+    // 设备信息 / 折线图
+    static devices = RawColors.grey__777777;            // .dynmon-devices 设备信息行
+    static legend = RawColors.grey__999999;             // .dynmon-legend 折线图图例
+    // 操作区
+    static actionButton = RawColors.white__ffffff;      // .dynmon-actions button 操作按钮
+    static modelSelect = RawColors.white__ffffff;       // .dynmon-select 模型筛选下拉框
+    static aggressiveToggle = RawColors.grey__888888;   // .dynmon-aggr 激进卸载开关文本
+    static sectionHeader = RawColors.grey__999999;      // .dynmon-sec-head 分区标题常态
+    static sectionHeaderHover = RawColors.grey__cccccc; // .dynmon-sec-head:hover 分区标题悬停
+    // 模型列表
+    static locationRemoved = RawColors.grey__777777;    // .dynmon-loc-removed 已移除徽章文本
+    static classBadge = RawColors.blue__9ec1e8;         // .dynmon-class 类名徽章文本
+    static fileName = RawColors.grey__e0e0e0;           // .dynmon-fname 模型文件名
+    static fileNameUnknown = RawColors.grey__777777;    // .dynmon-fname-unknown 未知文件名占位
+    static size = RawColors.grey__999999;               // .dynmon-size 模型行大小
+    static subText = RawColors.grey__888888;            // .dynmon-sub 模型行副文本
+    static timestamp = RawColors.grey__666666;          // .dynmon-time 模型行时间戳
+    static rowButton = RawColors.grey__999999;          // .dynmon-row-btns button 行按钮常态 (disabled:hover 复用)
+    static rowButtonHover = RawColors.white__ffffff;    // .dynmon-row-btns button:hover 行按钮悬停
+    static emptyHint = RawColors.grey__666666;          // .dynmon-empty 列表空态提示
+    static unloadButton = RawColors.red__ff6666;        // 行卸载按钮 [data-act="unload"] 常态
+    static unloadButtonHover = RawColors.red__ff6666;   // 行卸载按钮悬停
+    static unloadAllButton = RawColors.red__ff6666;     // .dynmon-sec-btn 卸载全部按钮常态
+    static unloadAllButtonHover = RawColors.red__ff6666; // .dynmon-sec-btn:hover 卸载全部按钮悬停
+    // 状态栏
+    static statusBar = RawColors.grey__888888;          // .dynmon-statusbar 状态栏基础文本
+    static statusBarValue = RawColors.grey__aaaaaa;     // .dynmon-sb-val 状态栏数值
+    static langSelect = RawColors.grey__bbbbbb;         // .dynmon-lang 语言下拉框
+    static rateButton = RawColors.grey__bbbbbb;         // .dynmon-rate-btn 刷新率步进按钮常态
+    static rateButtonHover = RawColors.white__ffffff;   // .dynmon-rate-btn:hover 步进按钮悬停
+    static rateInput = RawColors.white__ffffff;         // .dynmon-rate-input 刷新率输入框
+    // 消息行
+    static messageInfo = RawColors.blue__7aa2f7;        // .dynmon-msgbar 常规消息
+    static messageError = RawColors.red__f87171;        // .dynmon-msgbar.dynmon-status-err 错误消息
+    // 弹层
+    static tooltip = RawColors.grey__dddddd;            // .dynmon-tooltip 工具提示
+    // 位置徽章文本 (与折线图系列同源原始色, 见 SeriesColors)
+    static locationVram = RawColors.yellow__d29922;     // .dynmon-loc-vram 徽章文本
+    static locationRam = RawColors.green__66ff66;       // .dynmon-loc-ram 徽章文本
+    static locationPartial = RawColors.blue__66ccff;    // .dynmon-loc-partial 徽章文本
+    // 控件
+    static opacitySlider = RawColors.blue__66ccff;      // .dynmon-opacity 透明度滑杆填充 (accent-color)
+}
+Object.freeze(ForegroundColors);
 
-// 已加载模型的时间展示阈值等
+// ---------- 映射层: 背景 / 填充 ----------
+class BackgroundColors {
+    // 面板 / 标题栏 (标题栏四态由 headerTick 状态机消费)
+    static panel = RawColors.black__000000;             // .dynmon-panel 面板主体
+    static header = RawColors.grey__333333;             // 标题栏常规 (原 HEADER_DEFAULT)
+    static headerAlert = RawColors.red__cc0000;         // 标题栏警告 (温度超限 / 显存或内存告急)
+    static headerMinimized = RawColors.grey__333333;    // 标题栏最小化保持色 (原 HEADER_FLASH)
+    static headerMinimizeFlash = RawColors.red__cc0000; // 标题栏最小化瞬间起始色 (原 HEADER_FLASH_START)
+    // 指标卡片区
+    static card = RawColors.grey__333333;               // .dynmon-card 基础底色 (原 CARD_BASE_BG)
+    static cardWarn = RawColors.red__660000;            // 卡片告警混入端 (原 CARD_WARN_BG)
+    static cardUsageTrack = RawColors.grey__666666;     // .dynmon-bar 卡片占用条轨道
+    // 画布
+    static chartCanvas = RawColors.grey__111111;        // .dynmon-chartwrap canvas 画布底
+    // 操作区
+    static actionButton = RawColors.grey__222222;       // .dynmon-actions button 操作按钮
+    static actionButtonHover = RawColors.red__660000;   // .dynmon-actions button:hover
+    static modelSelect = RawColors.grey__222222;        // .dynmon-select 模型筛选下拉框
+    static langSelect = RawColors.grey__222222;         // .dynmon-lang 语言下拉框
+    static rateButton = RawColors.grey__222222;         // .dynmon-rate-btn 刷新率步进按钮
+    static rateButtonHover = RawColors.red__660000;     // .dynmon-rate-btn:hover
+    static rateInput = RawColors.black__000000;         // .dynmon-rate-input 刷新率输入框
+    // 模型列表
+    static rowUsageTrack = RawColors.grey__222222;      // .dynmon-vbar 体积占比条轨道
+    static volumeBarModel = RawColors.blue__66ccff73;   // .dynmon-vbar-model 模型总体积段 (JS 内联)
+    static volumeBarLoaded = RawColors.red__ff66668c;   // .dynmon-vbar-loaded 已加载段 (JS 内联)
+    static rowUsed = RawColors.green__14281c;           // .dynmon-row used 状态底色 (JS 内联)
+    static locationRemoved = RawColors.grey__333333;    // .dynmon-loc-removed 已移除徽章底
+    static locationVram = RawColors.yellow__4a3b12;     // .dynmon-loc-vram 徽章底
+    static locationRam = RawColors.green__12331c;       // .dynmon-loc-ram 徽章底
+    static locationPartial = RawColors.blue__14314a;    // .dynmon-loc-partial 徽章底
+    static classBadge = RawColors.blue__2d3a4dcc;       // .dynmon-class 类名徽章底
+    // 消息行 / 状态栏
+    static messageBar = RawColors.grey__333333;         // .dynmon-msgbar 消息行底
+    static statusBar = RawColors.grey__333333;          // .dynmon-statusbar 状态栏底
+    // 弹层
+    static tooltip = RawColors.grey__111111;            // .dynmon-tooltip 工具提示底
+}
+Object.freeze(BackgroundColors);
+
+// ---------- 映射层: 边框 / 分隔线 ----------
+class BorderColors {
+    // 面板 / 标题栏
+    static panel = RawColors.grey__333333;              // .dynmon-panel 面板外框
+    static header = RawColors.grey__333333;             // .dynmon-header 下边框静态初值 (运行时由背景色衍生覆盖)
+    static card = RawColors.grey__666666;               // .dynmon-card 描边 (原 CARD_BASE_BORDER)
+    static cardWarn = RawColors.red__cc0000;            // 卡片告警混入端 (原 CARD_WARN_BORDER)
+    static chartCanvas = RawColors.grey__222222;        // 折线图画布描边 (原 border-soft)
+    static chartGrid = RawColors.white__ffffff0f;       // canvas 网格线 (原 CHART_GRID_COLOR)
+    // 操作区
+    static actionButton = RawColors.grey__333333;       // .dynmon-actions button 描边
+    static actionButtonHover = RawColors.grey__cccccc;  // 操作按钮悬停描边 (原 border-btn-hover)
+    static modelSelect = RawColors.grey__333333;        // .dynmon-select 描边
+    static langSelect = RawColors.grey__333333;         // .dynmon-lang 描边
+    static rateStepper = RawColors.grey__333333;        // .dynmon-rate-stepper 描边
+    static rateStepperDivider = RawColors.grey__333333; // 步进按钮间 inset 分隔线
+    static rateInput = RawColors.grey__333333;          // .dynmon-rate-input 描边
+    // 模型列表
+    static row = RawColors.grey__666666;                // .dynmon-row 描边
+    static rowUsed = RawColors.green__2ea043;           // .dynmon-row used 状态描边 (JS 内联)
+    static rowHover = RawColors.blue__66ccff;           // .dynmon-row:hover 悬停描边 (原 focus)
+    static rowButton = RawColors.grey__333333;          // .dynmon-row-btns button 描边 (disabled:hover 复用)
+    static rowButtonHover = RawColors.grey__cccccc;     // 行按钮悬停描边 (原 border-btn-hover-strong)
+    static unloadButton = RawColors.red__660000;        // 行卸载按钮描边常态
+    static unloadButtonHover = RawColors.red__a04040;   // 行卸载按钮描边悬停
+    static unloadAllButton = RawColors.red__660000;     // .dynmon-sec-btn 卸载全部按钮描边
+    static unloadAllButtonHover = RawColors.red__a04040; // 卸载全部按钮描边悬停
+    // 状态栏
+    static statusBarItemSeparator = RawColors.grey__444444; // .dynmon-sb-item 左侧分隔线
+    // 弹层
+    static tooltip = RawColors.blue__66ccff;            // .dynmon-tooltip 描边 (原 focus)
+    static tooltipSeparator = RawColors.grey__666666;   // .dynmon-tip-sep 提示内分隔线
+}
+Object.freeze(BorderColors);
+
+// ---------- 映射层: 阴影 (几何 + 颜色层透明黑合成, 颜色改动只动颜色层) ----------
+class ShadowColors {
+    static panel = `0 4px 12px ${RawColors.black__00000080}`;   // .dynmon-panel 投影
+    static tooltip = `0 4px 16px ${RawColors.black__00000080}`; // .dynmon-tooltip 投影
+}
+Object.freeze(ShadowColors);
+
+// ---------- 映射层: 折线图系列 (画布曲线 / 图例圆点 / 卡片占用条, 仅 JS 引用不注入) ----------
+class SeriesColors {
+    static cpu = RawColors.blue__66ccff;
+    static ram = RawColors.green__66ff66;
+    static gpu = RawColors.red__ff6666;
+    static vram = RawColors.yellow__d29922;
+    static cpuTemp = RawColors.orange__e36209;
+    static gpuTemp = RawColors.orange__bc4c00;
+}
+Object.freeze(SeriesColors);
+
+// 映射层注入配置: [类, CSS 变量组前缀], 派生规则 --dynmon-<前缀>-<kebab(key)>
+const COLOR_GROUPS = [
+    [ForegroundColors, "foreground"],
+    [BackgroundColors, "background"],
+    [BorderColors, "border"],
+    [ShadowColors, "shadow"],
+];
+const CLASS_BUILTIN_KEYS = new Set(["length", "name", "prototype"]); // 类内建静态属性, 遍历时跳过
+// camelCase 转 kebab-case: headerButtonHover -> header-button-hover
+const kebabCase = (name) => name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
+
+// 标题栏颜色状态机渐变时长 (见 MonitorPanel.initHeaderFx): 所有场景统一 0.5s
+const HEADER_FADE_MS = 500;
+
 const GITHUB_URL = "https://github.com/inkbottle-9/comfyui_dynamic";
 
 // 按钮行右侧下拉框 (始终显示占位文本, 不随选择改变)
@@ -68,22 +279,49 @@ const QUICK_LINKS = [
     { label: "comfyui_dynamic (GitHub)", url: "https://github.com/inkbottle-9/comfyui_dynamic" },
 ];
 
-// 统计卡片定义 (顺序即展示顺序). pct: 从快照取百分比的取值函数; color: 迷你进度条颜色
+// 统计卡片定义 (顺序即展示顺序). pct: 从快照取百分比的取值函数; color: 占用条颜色 (引用映射层系列色)
 const CARDS = [
-    { key: "cpu", label: "CPU", color: "#58a6ff", pct: (d) => d.cpu?.percent },
-    { key: "ram", label: "RAM", color: "#3fb950", pct: (d) => d.ram?.percent },
-    { key: "gpu", label: "GPU", color: "#f85149", pct: (d) => d.devices?.[0]?.gpu_util },
-    { key: "vram", label: "VRAM", color: "#d29922", pct: (d) => d.devices?.[0]?.vram_percent },
-    { key: "cpu_temp", label: "CPU C", color: "#e36209", pct: (d) => d.cpu?.temp },
-    { key: "gpu_temp", label: "GPU C", color: "#bc4c00", pct: (d) => d.devices?.[0]?.temperature },
+    { key: "cpu", label: "CPU", color: SeriesColors.cpu, pct: (d) => d.cpu?.percent },
+    { key: "ram", label: "RAM", color: SeriesColors.ram, pct: (d) => d.ram?.percent },
+    { key: "gpu", label: "GPU", color: SeriesColors.gpu, pct: (d) => d.devices?.[0]?.gpu_util },
+    { key: "vram", label: "VRAM", color: SeriesColors.vram, pct: (d) => d.devices?.[0]?.vram_percent },
+    { key: "cpu_temp", label: "CPU C", color: SeriesColors.cpuTemp, pct: (d) => d.cpu?.temp },
+    { key: "gpu_temp", label: "GPU C", color: SeriesColors.gpuTemp, pct: (d) => d.devices?.[0]?.temperature },
 ];
 
-// 折线图系列 (仅百分比类卡片, 温度不画)
-const CHART_SERIES = CARDS.filter(c => ["cpu", "ram", "gpu", "vram"].includes(c.key));
+// 折线图系列 (全部六项: 利用率 0-100%, 温度单独域, 各系列按 CHART_DOMAIN 线性映射)
+const CHART_SERIES = CARDS.slice();
+
+// 折线图各系列 y 轴数值域 [min, max] (线性映射到图表高度, 超界截断; key 缺失时回退 0-100):
+// 利用率为百分比天然 0-100; 温度用窄域放大波动可见性 (满量程 20-90 C, 覆盖常见空闲-高载区间)
+const CHART_DOMAIN = {
+    cpu: [0, 100],
+    ram: [0, 100],
+    gpu: [0, 100],
+    vram: [0, 100],
+    cpu_temp: [20, 90],
+    gpu_temp: [20, 90],
+};
+const CHART_DOMAIN_FALLBACK = [0, 100]; // CHART_DOMAIN 未覆盖的 key 的回退域
+
+// 运行时行为参数 (ms): 集中置顶便于调整
+const HEARTBEAT_MS = 100;      // 心跳周期: 驱动启用开关与对话框开关轮询
+const HEADER_TICK_MS = 33;     // 标题栏颜色渐变 tick (约 30fps)
+const MSG_CLEAR_MS = 3500;     // 消息行自动清空延时
+const ACTION_REFRESH_MS = 350; // 用户动作 (卸载/清理) 后主动刷新延时
+
+// 折线图绘制参数 (canvas 直接绘制, 不经 CSS; 网格线颜色见 BorderColors.chartGrid)
+const CHART_PAD_Y = 4; // 曲线/网格上下安全边距 (px)
+
+// 左侧栏探测启发式 (detectLeftSidebarWidth): 判定贴附窗口左缘的导航栏元素
+const SIDEBAR_PROBE_MIN_W = 8;    // 最小宽度 (px)
+const SIDEBAR_PROBE_MAX_LEFT = 2; // 距窗口左缘最大距离 (px)
+const SIDEBAR_PROBE_MIN_H = 100;  // 最小高度 (px, 排除小工具条)
 
 // 设置键 (ComfyUI settings id / localStorage 键共用)
 const SETTING_RATE = "dynamic.ResourceMonitor.refreshRate";
 const SETTING_LANG = "dynamic.ResourceMonitor.language";
+const SETTING_OPACITY = "dynamic.ResourceMonitor.opacity";
 const SETTING_ENABLE = "dynamic.ResourceMonitor.enabled";
 
 // 行内图标 (SVG, currentColor 继承按钮颜色, 卸载按钮通过 CSS 置红)
@@ -106,6 +344,7 @@ const LANGS = {
         playTip: "Resume refreshing",
         resetTip: "Reset size and dock to bottom-left",
         dockTip: "Dock to bottom-left",
+        undockTip: "Undock: restore previous floating position",
         minimizeTip: "Minimize (double-click title)",
         restoreTip: "Restore",
         cleanRam: "Free RAM",
@@ -119,24 +358,24 @@ const LANGS = {
         alertTemp: (s) => `High temperature: ${s} C`,
         alertVram: (b) => `VRAM almost full (free ${b})`,
         alertRam: (b) => `RAM almost full (free ${b})`,
-        helpTip: "Help / GitHub",
         helpTitle: "Resource Monitor - comfyui_dynamic",
         helpText: [
             "Floating resource monitor from the comfyui_dynamic plugin.",
             "",
             "Cards: usage percent; background/border fade to red above 50%. Temperature cards use 100 C = 100%.",
-            "Chart: recent CPU / RAM / GPU / VRAM utilization history.",
+            "Chart: recent CPU / RAM / GPU / VRAM utilization and temperature history.",
             "",
             "Loaded models: green border = currently in use; bottom bar shows model size vs VRAM "
-                + "(red = loaded in VRAM, blue = remaining in RAM).",
-            "Unloaded models: models released since page load (kept for reference, max 30).",
+            + "(red = loaded in VRAM, blue = remaining in RAM).",
+            "Unloaded models: models released since page load (kept for reference, max 100).",
             "",
             "Header color: red = warning (any temp > 90 C, VRAM nearly full, or RAM free < 10%); "
-                + "blue flash = just minimized.",
+            + "blue flash = just minimized.",
             "Actions: Free RAM / Free VRAM clean up immediately when idle, or queue for after the current task.",
         ].join("\n"),
         langTip: "UI language",
         rateTip: "Refresh rate (0-10 Hz, 0 = paused)",
+        opacityTip: "Panel opacity (30-100%)",
         mouseTip: "Mouse position",
         posTip: "Panel position",
         sizeTip: "Panel size",
@@ -213,6 +452,7 @@ const LANGS = {
         playTip: "恢复刷新",
         resetTip: "重置尺寸并停靠到左下角",
         dockTip: "停靠到左下角",
+        undockTip: "退出停靠: 恢复之前的浮动位置",
         minimizeTip: "最小化 (可双击标题栏)",
         restoreTip: "还原",
         cleanRam: "清理内存",
@@ -225,23 +465,23 @@ const LANGS = {
         alertTemp: (s) => `温度过高: ${s} C`,
         alertVram: (b) => `显存告急 (剩余 ${b})`,
         alertRam: (b) => `内存告急 (剩余 ${b})`,
-        helpTip: "帮助 / GitHub 仓库",
         helpTitle: "资源监控 - comfyui_dynamic",
         helpText: [
             "comfyui_dynamic 插件自带的资源监控浮动面板.",
             "",
             "统计卡片: 占用百分比, 超过 50% 后背景与描边渐变为红色; 温度卡以 100 C = 100%.",
-            "折线图: CPU / RAM / GPU / VRAM 利用率的近期历史.",
+            "折线图: CPU / RAM / GPU / VRAM 利用率与温度的近期历史.",
             "",
             "已加载模型: 绿色边框 = 正在使用; 底部横条显示模型体积与显存的比例 "
-                + "(红色 = 已加载进显存, 蓝色 = 仍在内存的部分).",
-            "已卸载模型: 页面打开后被释放的模型记录 (最多保留 30 条, 仅供参考).",
+            + "(红色 = 已加载进显存, 蓝色 = 仍在内存的部分).",
+            "已卸载模型: 页面打开后被释放的模型记录 (最多保留 100 条, 仅供参考).",
             "",
             "标题栏颜色: 红色 = 警告 (任一温度超 90 C / 显存或内存告急); 蓝色闪动 = 刚被最小化.",
             "清理按钮: 队列空闲时立即生效, 任务执行中则延迟到任务结束后自动执行.",
         ].join("\n"),
         langTip: "界面语言",
         rateTip: "刷新率 (0-10 Hz, 0 = 暂停)",
+        opacityTip: "面板不透明度 (30-100%)",
         mouseTip: "鼠标位置",
         posTip: "面板位置",
         sizeTip: "面板尺寸",
@@ -362,9 +602,18 @@ function escapeHtml(text) {
         .replaceAll('"', "&quot;");
 }
 
-// 颜色线性混合: [r, g, b] 数组按 t (0-1) 从 a 混到 b, 返回 rgb() 字符串
+// "#rrggbb" 颜色解析为 [r, g, b] 数值数组 (严格 7 位格式, 不接受缩写/RGBA), 供颜色插值运算
+function hexRgb(hex) {
+    if (!/^#[0-9a-fA-F]{6}$/.test(hex))
+        throw new Error(`invalid color: ${hex}`);
+    return [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
+}
+
+// 颜色线性混合: 两个 "#rrggbb" 颜色按 t (0-1) 从 a 混到 b, 返回 rgb() 字符串
 function mixColor(a, b, t) {
-    const ch = (i) => Math.round(a[i] + (b[i] - a[i]) * t);
+    const ca = hexRgb(a);
+    const cb = hexRgb(b);
+    const ch = (i) => Math.round(ca[i] + (cb[i] - ca[i]) * t);
     return `rgb(${ch(0)}, ${ch(1)}, ${ch(2)})`;
 }
 
@@ -467,105 +716,122 @@ async function postJSON(path, body) {
 // ============================================================
 
 const CSS = `
-.dynmon-panel { position: fixed; bottom: 10px; right: 10px; width: 380px; height: 560px;
+/* 颜色变量体系:
+    - 全部颜色 (含阴影) 由文件顶部映射层 (ForegroundColors / BackgroundColors / BorderColors /
+      ShadowColors) 经 injectStyle() 注入, 变量名派生规则 --dynmon-<组前缀>-<kebab(key)>;
+    - 本文件不出现任何颜色字面量, 调色请到映射层与颜色层;
+    - 此处仅保留非颜色的布局变量 (z-index 等). */
+:root {
+    /* 层级 */
+    --dynmon-z-panel: 99990;
+    --dynmon-z-tip: 99999;
+}
+.dynmon-panel { position: fixed; bottom: 10px; right: 10px; width: var(--dynmon-w-default); height: var(--dynmon-h-default);
     min-width: 280px; min-height: 120px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px);
     display: flex; flex-direction: column;
-    background: #1e1e1e; border: 1px solid #444; border-radius: 8px; overflow: hidden;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, .5); z-index: 99990; resize: both;
-    color: #d4d4d4; font-family: sans-serif; font-size: 12px; user-select: none; }
+    background: var(--dynmon-background-panel); border: 1px solid var(--dynmon-border-panel); border-radius: 8px; overflow: hidden;
+    box-shadow: var(--dynmon-shadow-panel); z-index: var(--dynmon-z-panel); resize: both;
+    color: var(--dynmon-foreground-panel); font-family: sans-serif; font-size: 12px; user-select: none; }
 .dynmon-panel.dynmon-min { min-width: 0; min-height: 0; max-width: none; max-height: none;
     width: auto !important; height: auto !important; resize: none; }
 .dynmon-header { display: flex; align-items: center; gap: 8px; padding: 6px 10px;
-    background: #2a2a2a; border-bottom: 1px solid #444; cursor: move; flex: none; white-space: nowrap; }
+    background: var(--dynmon-background-header); border-bottom: 1px solid var(--dynmon-border-header); cursor: move; flex: none; white-space: nowrap; }
 .dynmon-title { font-weight: 600; font-size: 12px; }
-.dynmon-subtitle { font-size: 10px; color: #777; }
+.dynmon-subtitle { font-size: 10px; color: var(--dynmon-foreground-subtitle); }
 .dynmon-min .dynmon-subtitle { display: none; }
-.dynmon-alert { font-size: 10px; color: #ff6b6b; overflow: hidden; text-overflow: ellipsis; }
+.dynmon-alert { font-size: 10px; color: var(--dynmon-foreground-alert); overflow: hidden; text-overflow: ellipsis; }
 .dynmon-min .dynmon-alert { display: none; }
-.dynmon-hbtn { background: transparent; border: none; color: #888; cursor: pointer;
+.dynmon-hbtn { background: transparent; border: none; color: var(--dynmon-foreground-header-button); cursor: pointer;
     font-size: 13px; line-height: 1; padding: 2px 4px; }
-.dynmon-hbtn:hover { color: #fff; }
+.dynmon-hbtn:hover { color: var(--dynmon-foreground-header-button-hover); }
 .dynmon-hbtns { display: flex; align-items: center; gap: 2px; }
 .dynmon-hspring { flex: 1; }
 .dynmon-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
 .dynmon-cards { flex: none; display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; padding: 8px 8px 0; }
-.dynmon-card { background: #232323; border: 1px solid #383838; border-radius: 6px; padding: 5px 7px; min-width: 0;
+.dynmon-card { background: var(--dynmon-background-card); border: 1px solid var(--dynmon-border-card); border-radius: 6px; padding: 5px 7px; min-width: 0;
     transition: background-color .25s linear, border-color .25s linear; }
-.dynmon-card-label { font-size: 9px; color: #888; letter-spacing: .3px; }
+.dynmon-card-label { font-size: 9px; color: var(--dynmon-foreground-card-label); letter-spacing: .3px; }
 .dynmon-card-value { font-size: 13px; font-weight: 600; margin: 2px 0; }
-.dynmon-card-sub { font-size: 9px; color: #777; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dynmon-bar { height: 3px; background: #3a3a3a; border-radius: 2px; margin-top: 4px; overflow: hidden; }
+.dynmon-card-sub { font-size: 9px; color: var(--dynmon-foreground-card-sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dynmon-bar { height: 3px; background: var(--dynmon-background-card-usage-track); border-radius: 2px; margin-top: 4px; overflow: hidden; }
 .dynmon-bar > i { display: block; height: 100%; width: 0%; transition: width .2s; }
-.dynmon-devices { flex: none; padding: 4px 10px 0; font-size: 10px; color: #777; }
+.dynmon-devices { flex: none; padding: 4px 10px 0; font-size: 10px; color: var(--dynmon-foreground-devices); }
 .dynmon-devices > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dynmon-chartwrap { flex: none; padding: 8px 8px 0; }
-.dynmon-chartwrap canvas { width: 100%; height: 140px; display: block; background: #1b1b1b; border: 1px solid #333; border-radius: 6px; }
-.dynmon-legend { flex: none; display: flex; gap: 10px; padding: 4px 10px 0; font-size: 10px; color: #999; flex-wrap: wrap; }
+.dynmon-chartwrap canvas { width: 100%; height: 140px; display: block; background: var(--dynmon-background-chart-canvas); border: 1px solid var(--dynmon-border-chart-canvas); border-radius: 6px; }
+.dynmon-legend { flex: none; display: flex; gap: 10px; padding: 4px 10px 0; font-size: 10px; color: var(--dynmon-foreground-legend); flex-wrap: wrap; }
 .dynmon-legend .dynmon-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
 .dynmon-actions { flex: none; display: flex; align-items: center; gap: 6px; padding: 6px 8px; flex-wrap: wrap; }
-.dynmon-actions button, .dynmon-select { background: #2d2d2d; color: #d4d4d4; border: 1px solid #444; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 11px; outline: none; }
-.dynmon-actions button:hover { background: #3a3a3a; border-color: #555; }
-.dynmon-aggr { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; color: #888; cursor: pointer; }
-.dynmon-actions-right { margin-left: auto; display: inline-flex; gap: 6px; }
-.dynmon-select { max-width: 120px; }
+/* 操作按钮与模型筛选下拉框同为控件, 但按映射层约定各自持有独立颜色项, 故拆分设色 */
+.dynmon-actions button, .dynmon-select { border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 11px; outline: none; flex: none; }
+.dynmon-actions button { background: var(--dynmon-background-action-button); color: var(--dynmon-foreground-action-button); border: 1px solid var(--dynmon-border-action-button); }
+.dynmon-actions button:hover { background: var(--dynmon-background-action-button-hover); border-color: var(--dynmon-border-action-button-hover); }
+.dynmon-aggr { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; color: var(--dynmon-foreground-aggressive-toggle); cursor: pointer; flex: none; }
+.dynmon-actions-right { margin-left: auto; display: inline-flex; gap: 6px; flex: none; }
+.dynmon-select { width: 120px; background: var(--dynmon-background-model-select); color: var(--dynmon-foreground-model-select); border: 1px solid var(--dynmon-border-model-select); }
 .dynmon-models { padding: 0 8px 8px; }
 .dynmon-loaded-sec { flex: 1 1 auto; min-height: 60px; display: flex; flex-direction: column; }
 .dynmon-unloaded-sec { flex: none; max-height: 45%; display: flex; flex-direction: column; }
-.dynmon-sec-head { display: flex; align-items: center; gap: 4px; font-size: 11px; color: #999; padding: 2px; cursor: pointer; }
-.dynmon-sec-head:hover { color: #ccc; }
+.dynmon-sec-head { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--dynmon-foreground-section-header); padding: 2px; cursor: pointer; }
+.dynmon-sec-head:hover { color: var(--dynmon-foreground-section-header-hover); }
 .dynmon-chev { font-size: 9px; width: 10px; display: inline-block; transition: transform .15s; }
 .dynmon-sec-collapsed .dynmon-chev { transform: rotate(-90deg); }
 .dynmon-sec-collapsed .dynmon-list { display: none; }
-.dynmon-sec-btn { background: transparent; color: #f87272; border: 1px solid #6e2b2b; border-radius: 4px;
+.dynmon-sec-btn { background: transparent; color: var(--dynmon-foreground-unload-all-button); border: 1px solid var(--dynmon-border-unload-all-button); border-radius: 4px;
     width: 22px; height: 20px; display: inline-flex; align-items: center; justify-content: center;
     cursor: pointer; padding: 0; margin-left: auto; }
-.dynmon-sec-btn:hover { color: #ff9b9b; border-color: #a04040; }
+.dynmon-sec-btn:hover { color: var(--dynmon-foreground-unload-all-button-hover); border-color: var(--dynmon-border-unload-all-button-hover); }
 .dynmon-list { display: flex; flex-direction: column; gap: 4px; }
 .dynmon-loaded-sec .dynmon-list { flex: 1 1 auto; overflow-y: auto; min-height: 40px; }
-.dynmon-row { border: 1px solid #383838; border-radius: 6px; padding: 5px 8px; cursor: copy; flex: none;
+.dynmon-row { border: 1px solid var(--dynmon-border-row); border-radius: 6px; padding: 5px 8px; cursor: copy; flex: none;
     transition: background-color .2s linear, border-color .2s linear; }
-.dynmon-row:hover { border-color: #4a6ea9; }
+.dynmon-row:hover { border-color: var(--dynmon-border-row-hover); }
 .dynmon-row-top { display: flex; align-items: center; gap: 5px; min-width: 0; }
 .dynmon-loc { font-size: 9px; padding: 1px 5px; border-radius: 3px; flex: none; }
-.dynmon-loc-vram { background: #4a3b12; color: #d29922; }
-.dynmon-loc-ram { background: #12331c; color: #3fb950; }
-.dynmon-loc-partial { background: #14314a; color: #58a6ff; }
-.dynmon-loc-removed { background: #262626; color: #777; }
-.dynmon-class { font-size: 9px; padding: 1px 5px; border-radius: 3px; background: rgba(45, 58, 77, .8); color: #9ec1e8; flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dynmon-fname { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #e0e0e0; }
-.dynmon-fname-unknown { color: #777; font-style: italic; }
-.dynmon-size { flex: none; font-size: 10px; color: #999; }
-.dynmon-vbar { height: 4px; border-radius: 2px; background: #1b1b1b; margin-top: 4px; overflow: hidden; display: flex; }
+.dynmon-loc-vram { background: var(--dynmon-background-location-vram); color: var(--dynmon-foreground-location-vram); }
+.dynmon-loc-ram { background: var(--dynmon-background-location-ram); color: var(--dynmon-foreground-location-ram); }
+.dynmon-loc-partial { background: var(--dynmon-background-location-partial); color: var(--dynmon-foreground-location-partial); }
+.dynmon-loc-removed { background: var(--dynmon-background-location-removed); color: var(--dynmon-foreground-location-removed); }
+.dynmon-class { font-size: 9px; padding: 1px 5px; border-radius: 3px; background: var(--dynmon-background-class-badge); color: var(--dynmon-foreground-class-badge); flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dynmon-fname { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--dynmon-foreground-file-name); }
+.dynmon-fname-unknown { color: var(--dynmon-foreground-file-name-unknown); font-style: italic; }
+.dynmon-size { flex: none; font-size: 10px; color: var(--dynmon-foreground-size); }
+.dynmon-vbar { height: 4px; border-radius: 2px; background: var(--dynmon-background-row-usage-track); margin-top: 4px; overflow: hidden; display: flex; }
 .dynmon-vbar > i { display: block; height: 100%; }
 .dynmon-row-bottom { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
-.dynmon-sub { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: #888; }
-.dynmon-time { flex: none; font-size: 9px; color: #666; font-variant-numeric: tabular-nums; }
+.dynmon-sub { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: var(--dynmon-foreground-sub-text); }
+.dynmon-time { flex: none; font-size: 9px; color: var(--dynmon-foreground-timestamp); font-variant-numeric: tabular-nums; }
 .dynmon-row-btns { display: flex; gap: 4px; flex: none; }
-.dynmon-row-btns button { background: transparent; color: #999; border: 1px solid #444; border-radius: 4px;
+.dynmon-row-btns button { background: transparent; color: var(--dynmon-foreground-row-button); border: 1px solid var(--dynmon-border-row-button); border-radius: 4px;
     width: 22px; height: 20px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; }
-.dynmon-row-btns button:hover { color: #fff; border-color: #666; }
-.dynmon-row-btns button[data-act="unload"] { color: #f87272; border-color: #6e2b2b; }
-.dynmon-row-btns button[data-act="unload"]:hover { color: #ff9b9b; border-color: #a04040; }
+.dynmon-row-btns button:hover { color: var(--dynmon-foreground-row-button-hover); border-color: var(--dynmon-border-row-button-hover); }
+.dynmon-row-btns button[data-act="unload"] { color: var(--dynmon-foreground-unload-button); border-color: var(--dynmon-border-unload-button); }
+.dynmon-row-btns button[data-act="unload"]:hover { color: var(--dynmon-foreground-unload-button-hover); border-color: var(--dynmon-border-unload-button-hover); }
 .dynmon-row-btns button:disabled { opacity: .35; cursor: not-allowed; }
-.dynmon-row-btns button:disabled:hover { color: #999; border-color: #444; }
-.dynmon-row-btns button:disabled[data-act="unload"]:hover { color: #f87272; border-color: #6e2b2b; }
+.dynmon-row-btns button:disabled:hover { color: var(--dynmon-foreground-row-button); border-color: var(--dynmon-border-row-button); } /* disabled hover 恢复常态色 */
+.dynmon-row-btns button:disabled[data-act="unload"]:hover { color: var(--dynmon-foreground-unload-button); border-color: var(--dynmon-border-unload-button); }
 .dynmon-busy .dynmon-row-btns button[data-act="unload"] { opacity: .35; }
-.dynmon-empty { font-size: 11px; color: #666; text-align: center; padding: 10px; }
-.dynmon-tooltip { position: fixed; z-index: 99999; background: #1a1a1a; border: 1px solid #4a6ea9; color: #ddd; font-size: 11px; line-height: 1.5; padding: 8px 10px; border-radius: 6px; pointer-events: none; white-space: pre-wrap; word-break: break-all; overflow-wrap: anywhere; display: none; min-width: 120px; max-width: 480px; box-shadow: 0 4px 16px rgba(0, 0, 0, .5); }
-.dynmon-statusbar { display: flex; align-items: stretch; flex: none; font-size: 10px; color: #888;
-    border-top: 1px solid #383838; background: #232323; white-space: nowrap; }
-.dynmon-sb-item { display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-left: 1px solid #333; min-width: 0; }
+.dynmon-empty { font-size: 11px; color: var(--dynmon-foreground-empty-hint); text-align: center; padding: 10px; }
+.dynmon-tooltip { position: fixed; z-index: var(--dynmon-z-tip); background: var(--dynmon-background-tooltip); border: 1px solid var(--dynmon-border-tooltip); color: var(--dynmon-foreground-tooltip); font-size: 11px; line-height: 1.5; padding: 8px 10px; border-radius: 6px; pointer-events: none; white-space: pre-wrap; word-break: break-all; overflow-wrap: anywhere; display: none; min-width: 120px; max-width: 480px; box-shadow: var(--dynmon-shadow-tooltip); }
+.dynmon-tip-sep { border-top: 1px solid var(--dynmon-border-tooltip-separator); margin: 4px 0; }
+.dynmon-msgbar { flex: none; height: 18px; line-height: 18px; padding: 0 8px; font-size: 10px; color: var(--dynmon-foreground-message-info);
+    background: var(--dynmon-background-message-bar); border-top: 1px solid var(--dynmon-border-card); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dynmon-msgbar.dynmon-status-err { color: var(--dynmon-foreground-message-error); }
+.dynmon-statusbar { display: flex; align-items: stretch; flex: none; font-size: 10px; color: var(--dynmon-foreground-status-bar);
+    border-top: 1px solid var(--dynmon-border-card); background: var(--dynmon-background-status-bar); white-space: nowrap; }
+.dynmon-sb-item { display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-left: 1px solid var(--dynmon-border-status-bar-item-separator); flex: none; }
 .dynmon-sb-item:first-child { border-left: none; }
-.dynmon-sb-spring { flex: 1 1 auto; overflow: hidden; }
-.dynmon-status { color: #7aa2f7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dynmon-status.dynmon-status-err { color: #f87171; }
-.dynmon-lang { background: #2d2d2d; color: #bbb; border: 1px solid #444; border-radius: 3px; font-size: 10px; padding: 1px 2px; cursor: pointer; outline: none; }
-.dynmon-rate-btn { background: #2d2d2d; color: #bbb; border: 1px solid #444; border-radius: 3px; width: 16px; height: 16px; line-height: 1; font-size: 11px; cursor: pointer; padding: 0; }
-.dynmon-rate-btn:hover { color: #fff; background: #3a3a3a; }
-.dynmon-rate-input { width: 30px; background: #1e1e1e; color: #d4d4d4; border: 1px solid #444; border-radius: 3px; font-size: 10px; text-align: center; padding: 1px 0; outline: none; }
+.dynmon-sb-spring { flex: 1 1 auto; min-width: 0; overflow: hidden; }
+.dynmon-lang { background: var(--dynmon-background-lang-select); color: var(--dynmon-foreground-lang-select); border: 1px solid var(--dynmon-border-lang-select); border-radius: 3px; font-size: 10px; padding: 1px 2px; cursor: pointer; outline: none; }
+.dynmon-rate-stepper { display: inline-flex; border: 1px solid var(--dynmon-border-rate-stepper); border-radius: 3px; overflow: hidden; }
+.dynmon-rate-btn { background: var(--dynmon-background-rate-button); color: var(--dynmon-foreground-rate-button); border: none; width: 16px; height: 16px; line-height: 1; font-size: 11px; cursor: pointer; padding: 0; }
+.dynmon-rate-btn + .dynmon-rate-btn { box-shadow: inset 1px 0 0 var(--dynmon-border-rate-stepper-divider); }
+.dynmon-rate-btn:hover { color: var(--dynmon-foreground-rate-button-hover); background: var(--dynmon-background-rate-button-hover); }
+.dynmon-opacity { width: 56px; accent-color: var(--dynmon-foreground-opacity-slider); cursor: pointer; padding: 0; margin: 0; }
+.dynmon-rate-input { width: 30px; background: var(--dynmon-background-rate-input); color: var(--dynmon-foreground-rate-input); border: 1px solid var(--dynmon-border-rate-input); border-radius: 3px; font-size: 10px; text-align: center; padding: 1px 0; outline: none; }
 .dynmon-rate-input::-webkit-inner-spin-button, .dynmon-rate-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .dynmon-rate-input { -moz-appearance: textfield; appearance: textfield; }
-.dynmon-sb-val { color: #aaa; }
+.dynmon-sb-val { color: var(--dynmon-foreground-status-bar-value); }
 .dynmon-panel:not(.dynmon-min) .dynmon-resize-hint { position: absolute; right: 0; bottom: 0; width: 14px; height: 14px; cursor: nwse-resize; }
 `;
 
@@ -576,6 +842,31 @@ function injectStyle() {
     style.id = "dynmon-style";
     style.textContent = CSS;
     document.head.appendChild(style);
+
+    // 共享变量注入 [JS]: CSS 中不带默认值的 --dynmon-* 变量统一由此注入,
+    // 保证 JS 常量是唯一数据源 (改常量后 CSS 自动跟随, 不存在双份定义)
+    const root = document.documentElement.style;
+    root.setProperty("--dynmon-w-default", `${DEFAULT_W}px`);   // 面板默认尺寸
+    root.setProperty("--dynmon-h-default", `${DEFAULT_H}px`);
+    // 颜色变量: 遍历映射层静态类批量注入, 变量名派生规则 --dynmon-<组前缀>-<kebabCase(键)>;
+    // SeriesColors 仅 JS 内联引用 (折线图绘制), 不注入 CSS
+    const injected = new Set(["--dynmon-w-default", "--dynmon-h-default"]);
+    for (const [cls, prefix] of COLOR_GROUPS) {
+        for (const key of Object.getOwnPropertyNames(cls)) {
+            if (CLASS_BUILTIN_KEYS.has(key) || typeof cls[key] !== "string")
+                continue;
+            const name = `--dynmon-${prefix}-${kebabCase(key)}`;
+            root.setProperty(name, cls[key]);
+            injected.add(name);
+        }
+    }
+    // 校验: CSS 引用的 --dynmon-* 变量必须已有定义 (JS 注入或 CSS 内置), 防止改名后拼写漂移
+    const defined = new Set(injected);
+    for (const m of CSS.matchAll(/(--dynmon-[a-z0-9-]+)\s*:/g))
+        defined.add(m[1]);
+    for (const m of CSS.matchAll(/var\((--dynmon-[a-z0-9-]+)\)/g))
+        if (!defined.has(m[1]))
+            console.warn(`[comfyui_dynamic] undefined CSS variable: ${m[1]}`);
 }
 
 
@@ -596,9 +887,6 @@ function buildSubLine(m, t) {
     return `${m.dtype} · ${m.device} · ${buildLoadedDesc(m, t)} · ${m.used ? t.stateUsed : t.stateIdle}`;
 }
 
-// 弹窗分隔线 (提高可读性, 每个可换行信息块之间)
-const TIP_DIVIDER = "--------------------------------";
-
 function buildDetailText(m, t, isRemoved = false) {
     const pct = m.size > 0 ? Math.round((m.loaded / m.size) * 100) : 0;
     const lines = [`${m.class}${m.filename ? ` - ${m.filename}` : ""}`];
@@ -606,7 +894,6 @@ function buildDetailText(m, t, isRemoved = false) {
         lines.push(`${t.detailPath}: ${m.path}`);
     else
         lines.push(`${t.detailPath}: unknown`);
-    lines.push(TIP_DIVIDER);
     if (isRemoved) {
         // 已卸载: 状态相关字段统一置空语义
         lines.push(
@@ -625,7 +912,7 @@ function buildDetailText(m, t, isRemoved = false) {
             `${t.detailStatus}: ${loc}${m.used ? `, ${t.stateUsed}` : `, ${t.stateIdle}`}`,
         );
     }
-    lines.push(TIP_DIVIDER, `UUID: ${m.uuid}`);
+    lines.push(`UUID: ${m.uuid}`);
     return lines.join("\n");
 }
 
@@ -641,7 +928,7 @@ class MonitorPanel {
         this.paused = this.rate === 0; // 初始刷新率为 0 时视为暂停态
         this.enabled = true;
         this.lastUpdated = -1e9;
-        this.history = [];       // 折线图历史: { cpu, ram, gpu, vram }
+        this.history = [];       // 折线图历史: { cpu, ram, gpu, vram, cpu_temp, gpu_temp }
         this.busy = false;
         this.lastCpuCores = null; // 卡片 tooltip 用的最近元信息
         this.lastGpuName = "";
@@ -650,7 +937,12 @@ class MonitorPanel {
         this.modelsSignature = null;
         this.errorShown = false;
         this.statusTimer = null;
+        this.minimized = false;  // 最小化状态 (显式初始化, 不依赖 undefined 隐式行为)
         this.savedSize = null;   // 最小化前的尺寸 { w, h }
+        this.docked = false;     // 是否处于停靠模式 (左下角, 随窗口尺寸变化保持贴合)
+        this.floatPos = null;    // 浮动状态坐标记忆 { left, top } (仅浮动态更新, 供退出停靠时恢复)
+        this.opacity = clamp(parseInt(getSetting(SETTING_OPACITY, DEFAULT_OPACITY), 10) || DEFAULT_OPACITY,
+            MIN_OPACITY, MAX_OPACITY); // 面板不透明度 (MIN_OPACITY - MAX_OPACITY %)
         this.autoMinimized = false; // 是否因对话框弹出而自动最小化 (关闭时自动还原)
         this.positioned = false; // 是否已用 left/top 定位 (初始用 right/bottom 锚定)
         this.mouseRaf = false;   // 鼠标坐标 rAF 节流标志
@@ -662,12 +954,12 @@ class MonitorPanel {
         // 签名初值用 null 而非 "": 保证首次快照为空列表时也执行一次占位符渲染
         this.unloadedSignature = null;
 
-        // 标题栏颜色状态机: 调用方只通过 hdrFrom/hdrTarget 描述目标色, 渐变由统一循环插值
+        // 标题栏颜色状态机: 调用方只通过 setHdrTarget 发布目标色 (BackgroundColors 中 header*
+        // 系列为 "#RRGGBB" 字符串, VSC 可预览), 初始时解析为数值; 渐变由统一循环插值
         // (State + Tween 模式: 目标值发布与渲染解耦, 单一 ticker 消费目标状态)
-        this.hdrFrom = HEADER_DEFAULT.slice();
-        this.hdrCur = HEADER_DEFAULT.slice();
-        this.hdrTarget = HEADER_DEFAULT.slice();
-        this.hdrTargetAt = performance.now();
+        this.hdrCur = hexRgb(BackgroundColors.header);
+        this.hdrFrom = this.hdrCur.slice();
+        this.setHdrTarget(BackgroundColors.header, performance.now());
         this.hdrMinAt = -1e9; // 上次最小化时刻 (蓝色闪动窗口判定用)
 
         injectStyle();
@@ -675,7 +967,10 @@ class MonitorPanel {
         this.bindEvents();
         this.applyI18n();
         this.syncRateDisplay();
+        this.applyOpacity();
         this.initHeaderFx();
+        // 初始即停靠左下角 (与重置按钮一致; 无浮动记忆, 退出停靠时原地转为浮动)
+        this.dockBottomLeft();
     }
 
     t(key, ...args) {
@@ -734,6 +1029,7 @@ class MonitorPanel {
                     <div class="dynmon-list dynmon-list-unloaded"></div>
                 </div>
             </div>
+            <div class="dynmon-msgbar"></div>
             <div class="dynmon-statusbar">
                 <div class="dynmon-sb-item">
                     <select class="dynmon-lang" title="Language / 语言">
@@ -741,13 +1037,16 @@ class MonitorPanel {
                         <option value="zh">中文</option>
                     </select>
                 </div>
+                <div class="dynmon-sb-item"><input class="dynmon-opacity" type="range" min="30" max="100" step="5"></div>
                 <div class="dynmon-sb-item dynmon-rate-group">
-                    <button class="dynmon-rate-btn" data-rate="-1">-</button>
-                    <button class="dynmon-rate-btn" data-rate="1">+</button>
+                    <span class="dynmon-rate-stepper">
+                        <button class="dynmon-rate-btn" data-rate="-1">-</button>
+                        <button class="dynmon-rate-btn" data-rate="1">+</button>
+                    </span>
                     <input class="dynmon-rate-input" type="number" min="0" max="10" step="1">
                     <span>Hz</span>
                 </div>
-                <div class="dynmon-sb-item dynmon-sb-spring"><span class="dynmon-status"></span></div>
+                <div class="dynmon-sb-item dynmon-sb-spring"></div>
                 <div class="dynmon-sb-item"><span class="dynmon-mouse dynmon-sb-val">(0, 0)</span></div>
                 <div class="dynmon-sb-item"><span class="dynmon-pos dynmon-sb-val">(0, 0)</span></div>
                 <div class="dynmon-sb-item"><span class="dynmon-psize dynmon-sb-val">0x0</span></div>
@@ -813,7 +1112,8 @@ class MonitorPanel {
         this.devicesEl = panel.querySelector(".dynmon-devices");
         this.canvas = panel.querySelector("canvas");
         this.ctx = this.canvas.getContext("2d");
-        this.statusEl = panel.querySelector(".dynmon-status");
+        this.msgEl = panel.querySelector(".dynmon-msgbar"); // 独立消息行 (状态栏上方)
+        this.opacityInput = panel.querySelector(".dynmon-opacity");
         this.aggrCheckbox = panel.querySelector(".dynmon-aggr input");
         this.countEl = panel.querySelector(".dynmon-count");
         this.countUnloadedEl = panel.querySelector(".dynmon-count-unloaded");
@@ -825,6 +1125,7 @@ class MonitorPanel {
         this.clearUnloadedBtn = panel.querySelector('[data-act="clear-unloaded"]');
         this.tipEl = panel.querySelector(".dynmon-tooltip");
         this.tipVisible = false;
+        this.tipRow = null; // tooltip 当前关联行 (行移除/列表重建时联动隐藏)
         this.langSelect = panel.querySelector(".dynmon-lang");
         this.rateInput = panel.querySelector(".dynmon-rate-input");
         this.rateGroupEl = panel.querySelector(".dynmon-rate-group");
@@ -874,7 +1175,7 @@ class MonitorPanel {
             else if (act === "reset")
                 this.resetLayout();
             else if (act === "dock")
-                this.dockBottomLeft();
+                this.toggleDock();
             else if (act === "min")
                 this.setMinimized(!this.minimized);
         });
@@ -888,44 +1189,104 @@ class MonitorPanel {
         });
         this.helpBtn.addEventListener("mouseleave", () => this.hideTip());
 
-        // 双击标题栏 = 最小化/复原
-        this.headerEl.addEventListener("dblclick", (e) => {
-            if (e.target.closest(".dynmon-hbtn"))
+        // 标题栏拖动与双击 (自定义状态机, 不使用内置 dblclick: 其判定阈值不可定制,
+        // 且与拖动状态无关联, 无法实现拖动清除点击记忆):
+        // - pointerdown: 记录按下点与抓取偏移 (相对位置自此固定), 并做双击判定
+        //   (与上一次按下间隔 < DRAG_DBL_MS 即切换最小化并清空点击记忆)
+        // - pointermove: 位移超过 DRAG_MOVE_PX (不含) 才进入拖动, 进入时清除点击记忆
+        //   (被拖动的按压不计入点击序列); 拖动全程保持按下时刻的相对位置
+        // - pointerup/cancel: 结束按压, 无位移的按压自然成为下一次双击判定的记忆
+        // 健壮性: setPointerCapture 保证鼠标移出窗口/卡顿丢事件时仍能收到抬起消息;
+        // pointercancel 与 buttons 位掩码检查兜底, 杜绝拖动状态卡死
+        let downX = 0, downY = 0;
+        let dragX = 0, dragY = 0, dragging = false, dragId = -1;
+        let lastPressAt = 0; // 上一次按下的时刻, 双击判定用 (拖动 / 触发双击 / 取消时清零)
+        const onMove = (ev) => {
+            if (ev.pointerId !== dragId)
                 return;
-            this.setMinimized(!this.minimized);
-        });
-
-        // 标题栏拖动 (限制以标题栏为准: 标题栏始终完整留在窗口内, 主体允许超出)
-        let dragX = 0, dragY = 0, dragging = false;
+            // 左键已物理松开但 pointerup 丢失 (卡顿场景): 立即结束拖动
+            if (!(ev.buttons & 1)) {
+                endDrag();
+                return;
+            }
+            if (!dragging) {
+                // 位移未超过阈值: 仍处于按下状态, 面板保持不动
+                if (Math.hypot(ev.clientX - downX, ev.clientY - downY) <= DRAG_MOVE_PX)
+                    return;
+                dragging = true;
+                lastPressAt = 0; // 拖动清除点击记忆
+                // 停靠态拖动 = 退出停靠且不恢复记忆 (拖动位置随即覆盖浮动记忆, 逻辑上等效)
+                if (this.docked)
+                    this.exitDock(false);
+            }
+            this.positioned = true;
+            this.panel.style.left = `${ev.clientX - dragX}px`;
+            this.panel.style.top = `${ev.clientY - dragY}px`;
+            this.panel.style.right = "auto";
+            this.panel.style.bottom = "auto";
+            this.clampHeaderIntoWindow();
+        };
+        const endDrag = () => {
+            if (dragId === -1)
+                return;
+            dragging = false;
+            dragId = -1;
+            document.removeEventListener("pointermove", onMove);
+            document.removeEventListener("pointerup", onUp);
+            document.removeEventListener("pointercancel", onCancel);
+            this.updatePosSizeLabels();
+        };
+        const onUp = (ev) => {
+            if (ev.pointerId !== dragId)
+                return;
+            endDrag();
+        };
+        const onCancel = (ev) => {
+            if (ev.pointerId !== dragId)
+                return;
+            const wasDragging = dragging;
+            endDrag();
+            if (!wasDragging)
+                lastPressAt = 0; // 被系统中断的按压不应计入点击序列
+        };
         this.headerEl.addEventListener("pointerdown", (e) => {
             if (e.target.closest(".dynmon-hbtn"))
                 return;
-            dragging = true;
+            if (e.button !== 0)
+                return; // 仅左键拖动
+            // 双击判定 (按下时触发, 与操作系统窗口管理一致): 与上一次按下间隔足够近即切换最小化;
+            // 触发后该次按压被完全吞掉, 不进入按压状态 (不记录抓取偏移 / 不注册监听),
+            // 与 Windows 行为一致: 双击后按住移动不会转为拖动; 记忆已清零, 三连击不会连续判定
+            const now = performance.now();
+            if (now - lastPressAt < DRAG_DBL_MS) {
+                lastPressAt = 0;
+                this.setMinimized(!this.minimized);
+                return;
+            }
+            lastPressAt = now;
+            dragId = e.pointerId;
+            downX = e.clientX;
+            downY = e.clientY;
+            // 抓取偏移在按下时刻固定: 拖动全程保持按下时标题栏与指针的相对位置
             dragX = e.clientX - this.panel.offsetLeft;
             dragY = e.clientY - this.panel.offsetTop;
-            const onMove = (ev) => {
-                if (!dragging)
-                    return;
-                this.positioned = true;
-                this.panel.style.left = `${ev.clientX - dragX}px`;
-                this.panel.style.top = `${ev.clientY - dragY}px`;
-                this.panel.style.right = "auto";
-                this.panel.style.bottom = "auto";
-                this.clampHeaderIntoWindow();
-            };
-            const onUp = () => {
-                dragging = false;
-                document.removeEventListener("pointermove", onMove);
-                document.removeEventListener("pointerup", onUp);
-                this.updatePosSizeLabels();
-            };
+            try {
+                // 捕获指针: 后续 move/up 定向派发, 窗口外松开也能收到 (事件仍冒泡至 document)
+                this.headerEl.setPointerCapture(e.pointerId);
+            } catch {
+                // 指针已失效: 忽略, document 级监听 + buttons 检查兜底
+            }
             document.addEventListener("pointermove", onMove);
             document.addEventListener("pointerup", onUp);
+            document.addEventListener("pointercancel", onCancel);
         });
 
-        // 浏览器窗口缩放时强制贴边
+        // 浏览器窗口缩放: 停靠态重新贴合左下角, 浮动态夹取回窗口内
         window.addEventListener("resize", () => {
-            this.clampHeaderIntoWindow();
+            if (this.docked)
+                this.applyDockPosition();
+            else
+                this.clampHeaderIntoWindow();
             this.updatePosSizeLabels();
         });
 
@@ -1004,7 +1365,7 @@ class MonitorPanel {
         this.contentEl.addEventListener("mouseover", (e) => {
             const row = e.target.closest(".dynmon-row");
             if (row?.dataset.tip) {
-                this.tipEl.textContent = row.dataset.tip;
+                this.renderRowTip(row.dataset.tip);
                 this.tipEl.style.display = "block";
                 this.tipVisible = true;
                 this.tipRow = row; // 记录关联行, 行被移除时用于联动隐藏
@@ -1028,6 +1389,16 @@ class MonitorPanel {
             this.lang = this.langSelect.value === "zh" ? "zh" : "en";
             setSetting(SETTING_LANG, this.lang);
             this.applyI18n();
+            this.refreshLayout(); // 轻量刷新: 强制回流 + 派生布局重算, 消除切换后的一次性位移
+        });
+
+        // 面板透明度滑动条: 拖动实时应用, 松手时持久化 (MIN_OPACITY - MAX_OPACITY %)
+        this.opacityInput.addEventListener("input", () => {
+            this.opacity = clamp(parseInt(this.opacityInput.value, 10) || DEFAULT_OPACITY, MIN_OPACITY, MAX_OPACITY);
+            this.panel.style.opacity = `${this.opacity / 100}`;
+        });
+        this.opacityInput.addEventListener("change", () => {
+            setSetting(SETTING_OPACITY, this.opacity);
         });
 
         // 刷新率: +/- 按钮与直接输入 (暂停态点 + 解除暂停并置 1)
@@ -1066,9 +1437,12 @@ class MonitorPanel {
         const top = clamp(this.panel.offsetTop, EDGE, window.innerHeight - h - EDGE);
         this.panel.style.left = `${left}px`;
         this.panel.style.top = `${top}px`;
+        // 仅浮动态更新记忆坐标 (停靠态不覆盖, 保证退出停靠能回到原浮动位置)
+        if (!this.docked)
+            this.floatPos = { left, top };
     }
 
-    // 重置 = 恢复默认尺寸 + 停靠左下角 (与停靠按钮同一效果)
+    // 重置 = 恢复默认尺寸 + 进入停靠模式 (与初始位置语义一致)
     resetLayout() {
         if (this.minimized)
             this.setMinimized(false);
@@ -1077,19 +1451,56 @@ class MonitorPanel {
         this.dockBottomLeft();
     }
 
-    // 停靠到左下角: 整个面板主体可见, 左边距避开 ComfyUI 左侧栏
-    dockBottomLeft() {
+    // 停靠/退出停靠切换 (箭头按钮): 箭头方向由 syncDockButton 依状态显示
+    toggleDock() {
+        if (!this.docked) {
+            this.dockBottomLeft(); // 进入停靠 (最小化时即标题栏停靠)
+            return;
+        }
+        // 退出停靠: 最小化时先展开 (保持停靠) 再退出, 恢复记忆位置
         if (this.minimized)
             this.setMinimized(false);
+        this.exitDock();
+    }
+
+    // 进入停靠模式: 贴附左下角并随窗口尺寸变化保持; 不改动浮动记忆
+    dockBottomLeft() {
+        this.docked = true;
         this.positioned = true;
+        this.applyDockPosition();
+        this.syncDockButton();
+        this.updatePosSizeLabels();
+    }
+
+    // 退出停靠模式: restore = true 时回到记忆坐标, 无记忆则原地转为浮动;
+    // restore = false 用于停靠中拖动 (记忆位置随即被拖动值覆盖)
+    exitDock(restore = true) {
+        this.docked = false;
+        if (restore && this.floatPos) {
+            this.panel.style.left = `${this.floatPos.left}px`;
+            this.panel.style.top = `${this.floatPos.top}px`;
+        }
+        this.syncDockButton();
+        if (!this.minimized)
+            this.clampHeaderIntoWindow(); // 窗口可能已变化, 恢复后夹取 (并刷新浮动记忆)
+        this.updatePosSizeLabels();
+    }
+
+    // 停靠定位: 左侧避开 ComfyUI 左侧栏, 底部保持专用偏移常量
+    applyDockPosition() {
         const sidebar = this.detectLeftSidebarWidth();
-        const w = this.panel.offsetWidth;
         const h = this.panel.offsetHeight;
         this.panel.style.right = "auto";
         this.panel.style.bottom = "auto";
-        this.panel.style.left = `${sidebar + EDGE}px`;
-        this.panel.style.top = `${Math.max(EDGE, window.innerHeight - h - DOCK_MARGIN)}px`;
-        this.updatePosSizeLabels();
+        this.panel.style.left = `${sidebar + DOCK_OFFSET_X}px`;
+        this.panel.style.top = `${Math.max(EDGE, window.innerHeight - h - DOCK_OFFSET_Y)}px`;
+    }
+
+    // 停靠按钮随状态同步 (箭头方向反映当前是否停靠, 而非点击动作);
+    // 停靠状态变化来源多样 (按钮/最小化/拖动), 统一由状态驱动
+    syncDockButton() {
+        this.dockBtn.textContent = this.docked ? "\u2197" : "\u2199";
+        this.dockBtn.title = this.t(this.docked ? "undockTip" : "dockTip");
     }
 
     // 探测 ComfyUI 左侧边栏宽度, 探测失败用兜底值 (避免遮挡)
@@ -1101,7 +1512,8 @@ class MonitorPanel {
                 if (el) {
                     const rect = el.getBoundingClientRect();
                     // 仅统计贴附在窗口左缘且可见的元素
-                    if (rect.width > 8 && rect.left <= 2 && rect.height > 100)
+                    if (rect.width > SIDEBAR_PROBE_MIN_W && rect.left <= SIDEBAR_PROBE_MAX_LEFT
+                        && rect.height > SIDEBAR_PROBE_MIN_H)
                         return rect.width;
                 }
             } catch {
@@ -1121,20 +1533,33 @@ class MonitorPanel {
             panel.classList.add("dynmon-min");
             this.contentEl.style.display = "none";
             panel.querySelector(".dynmon-statusbar").style.display = "none";
+            panel.querySelector(".dynmon-msgbar").style.display = "none";
             this.flashMinimize(); // 瞬时红色, 由标题栏状态机渐变为蓝色
+            // 浮动态最小化: 标题栏同时停靠到左下角 (进入停靠模式, 不影响浮动记忆);
+            // 已停靠时主体已折叠, 需以折叠后的标题栏高度重新贴合左下角
+            if (!this.docked)
+                this.dockBottomLeft();
+            else
+                this.applyDockPosition();
         } else {
             panel.classList.remove("dynmon-min");
             this.contentEl.style.display = "";
             panel.querySelector(".dynmon-statusbar").style.display = "";
+            panel.querySelector(".dynmon-msgbar").style.display = "";
             if (this.savedSize) {
                 panel.style.width = `${this.savedSize.w}px`;
                 panel.style.height = `${this.savedSize.h}px`;
             }
+            // 停靠态展开: 保持停靠模式, 以展开后的完整高度重新贴合左下角
+            // (退出停靠仅由停靠按钮 / 拖动触发)
+            if (this.docked)
+                this.applyDockPosition();
         }
         this.minBtn.textContent = target ? "+" : "–";
         this.minBtn.title = target ? this.t("restoreTip") : this.t("minimizeTip");
         this.positioned = true;
-        this.clampHeaderIntoWindow();
+        if (!this.docked)
+            this.clampHeaderIntoWindow(); // 停靠态由 applyDockPosition 定位, 不做通用夹取
         this.updatePosSizeLabels();
         if (!target)
             this.drawChart();
@@ -1149,15 +1574,34 @@ class MonitorPanel {
         this.sizeEl.textContent = `${w}x${h}`;
     }
 
+    // 面板透明度应用 (滑动条实时调用; tooltip 为面板子元素, 一并跟随透明度)
+    applyOpacity() {
+        this.opacityInput.value = String(this.opacity);
+        this.panel.style.opacity = `${this.opacity / 100}`;
+    }
+
+    // 语言切换后的轻量刷新: 强制同步回流并重算派生布局状态.
+    // 原生 DOM 无显式重渲染调用, 同步读取布局属性 (offsetHeight) 即引擎的强制重排入口,
+    // 可冲掉文本替换后的悬空布局状态, 再重算依赖布局的派生值保证立即收敛
+    refreshLayout() {
+        void this.panel.offsetHeight; // 同步回流
+        if (this.docked)
+            this.applyDockPosition();
+        else
+            this.clampHeaderIntoWindow();
+        this.updatePosSizeLabels();
+        this.drawChart();
+    }
+
     // ---------- i18n 应用 ----------
 
     applyI18n() {
         this.titleEl.textContent = this.t("title");
         this.subtitleEl.textContent = this.t("subtitle");
         this.syncPauseButton();
-        this.helpBtn.title = this.t("helpTip");
+        // 问号按钮不设原生 title: 避免原生提示约 1s 后弹出并遮挡自定义帮助弹窗
         this.resetBtn.title = this.t("resetTip");
-        this.dockBtn.title = this.t("dockTip");
+        this.syncDockButton();
         this.minBtn.title = this.minimized ? this.t("restoreTip") : this.t("minimizeTip");
         this.ramBtn.textContent = this.t("cleanRam");
         this.vramBtn.textContent = this.t("cleanVram");
@@ -1173,10 +1617,11 @@ class MonitorPanel {
         // 状态栏工具提示
         this.langSelect.title = this.t("langTip");
         this.rateGroupEl.title = this.t("rateTip");
+        this.opacityInput.title = this.t("opacityTip");
         this.mouseEl.title = this.t("mouseTip");
         this.posEl.title = this.t("posTip");
         this.sizeEl.title = this.t("sizeTip");
-        this.statusEl.title = this.t("statusTip");
+        this.msgEl.title = this.t("statusTip");
 
         // 统计卡片工具提示 (构造时解析好各卡的文案函数)
         for (const key of Object.keys(this.cardTipFns || {}))
@@ -1225,8 +1670,8 @@ class MonitorPanel {
 
     setRate(value) {
         this.rate = clamp(parseInt(value, 10) || 0, 0, 10);
-        if (this.rate > 0 && this.paused)
-            this.paused = false;
+        // 统一 paused 语义: rate=0 即暂停态 (与初始加载 rate=0 时的状态一致)
+        this.paused = this.rate === 0;
         this.syncRateDisplay();
         this.syncPauseButton();
         setSetting(SETTING_RATE, this.rate);
@@ -1237,12 +1682,21 @@ class MonitorPanel {
     }
 
     // ---------- 标题栏颜色状态机 ----------
-    // 模式说明: State + Tween. 调用方 (最小化 / 警告 / 恢复) 只发布目标色,
-    // 唯一的 ticker 循环负责把当前色向目标色线性插值并渲染, 调用方无需关心渐变过程.
+    // 模式说明: State + Tween. 调用方 (最小化 / 警告 / 恢复) 只发布目标色 (BackgroundColors
+    // 中 header* 系列为 "#RRGGBB" 字符串, 便于 VSC 预览), 目标切换时经 setHdrTarget 解析一次为 [r, g, b] 数值,
+    // 唯一的 ticker 循环负责把当前色向目标色线性插值并渲染, 插值路径无解析开销.
 
-    // 启动标题栏渐变循环 (33ms 约等于 30fps, 足够平滑且开销可忽略)
+    // 启动标题栏渐变循环 (HEADER_TICK_MS 约等于 30fps, 足够平滑且开销可忽略)
     initHeaderFx() {
-        this.hdrTimer = setInterval(() => this.headerTick(), 33);
+        this.hdrTimer = setInterval(() => this.headerTick(), HEADER_TICK_MS);
+    }
+
+    // 设置插值目标: 记录解析后的 [r, g, b] 与起点, 供 headerTick 逐帧插值
+    setHdrTarget(hex, at) {
+        this.hdrFrom = this.hdrCur.slice();
+        this.hdrTargetHex = hex;
+        this.hdrTarget = hexRgb(hex);
+        this.hdrTargetAt = at;
     }
 
     headerTick() {
@@ -1251,37 +1705,32 @@ class MonitorPanel {
         const now = performance.now();
 
         // 目标色优先级: 警告 > 最小化蓝色保持 (不回到默认, 展开才回) > 默认
-        let target = HEADER_DEFAULT;
+        let target = BackgroundColors.header;
         if (this.alertReasons.length > 0)
-            target = HEADER_ALERT;
+            target = BackgroundColors.headerAlert;
         else if (this.minimized)
-            target = HEADER_FLASH;
+            target = BackgroundColors.headerMinimized;
 
-        if (target !== this.hdrTarget) {
-            this.hdrFrom = this.hdrCur.slice();
-            this.hdrTarget = target;
-            this.hdrTargetAt = now;
-        }
+        // 目标切换时才重新记录起点并解析 (同一目标重复赋值不重置渐变进度)
+        if (target !== this.hdrTargetHex)
+            this.setHdrTarget(target, now);
 
-        // 线性插值: 红色闪动全程 1s, 其余过渡用较短时长
+        // 线性插值: 统一 0.5s 过渡时长
         const from = this.hdrFrom;
-        const dur = (from === HEADER_FLASH || target === HEADER_FLASH) ? HEADER_FADE_MS : HEADER_FADE_FAST_MS;
-        const t = clamp((now - this.hdrTargetAt) / dur, 0, 1);
+        const t = clamp((now - this.hdrTargetAt) / HEADER_FADE_MS, 0, 1);
         for (let i = 0; i < 3; i++)
-            this.hdrCur[i] = Math.round(from[i] + (target[i] - from[i]) * t);
+            this.hdrCur[i] = Math.round(from[i] + (this.hdrTarget[i] - from[i]) * t);
 
         const [r, g, b] = this.hdrCur;
         this.headerEl.style.backgroundColor = `rgb(${r}, ${g}, ${b})`;
         this.headerEl.style.borderBottomColor = `rgb(${Math.round(r * 0.6)}, ${Math.round(g * 0.6)}, ${Math.round(b * 0.6)})`;
     }
 
-    // 最小化瞬间: 当前色立即置红 (不渐变), 之后由 ticker 在 1s 内渐变为蓝色
+    // 最小化瞬间: 当前色立即置 headerMinimizeFlash 红 (不渐变), 之后由 ticker 渐变为保持色
     flashMinimize() {
         this.hdrMinAt = performance.now();
-        this.hdrCur = HEADER_ALERT.slice();
-        this.hdrFrom = this.hdrCur.slice();
-        this.hdrTarget = HEADER_FLASH.slice();
-        this.hdrTargetAt = this.hdrMinAt;
+        this.hdrCur = hexRgb(BackgroundColors.headerMinimizeFlash);
+        this.setHdrTarget(BackgroundColors.headerMinimized, this.hdrMinAt);
     }
 
     // ---------- 警告计算 ----------
@@ -1317,12 +1766,13 @@ class MonitorPanel {
     // ---------- 状态反馈 ----------
 
     flash(message, isError = false) {
-        this.statusEl.textContent = message;
-        this.statusEl.classList.toggle("dynmon-status-err", isError);
+        // 消息显示在状态栏上方的独立消息行 (固定高度, 不挤压状态栏布局)
+        this.msgEl.textContent = message;
+        this.msgEl.classList.toggle("dynmon-status-err", isError);
         clearTimeout(this.statusTimer);
         this.statusTimer = setTimeout(() => {
-            this.statusEl.textContent = "";
-        }, 3500);
+            this.msgEl.textContent = "";
+        }, MSG_CLEAR_MS);
     }
 
     onError() {
@@ -1352,6 +1802,8 @@ class MonitorPanel {
             ram: round1(data.ram?.percent) ?? 0,
             gpu: round1(primary?.gpu_util),
             vram: round1(primary?.vram_percent) ?? 0,
+            cpu_temp: round1(data.cpu?.temp),        // null = 不可用 (缺 LibreHardwareMonitor 等)
+            gpu_temp: round1(primary?.temperature),  // null = GPU 不可用
         };
         this.history.push(sample);
         if (this.history.length > MAX_POINTS)
@@ -1370,8 +1822,8 @@ class MonitorPanel {
             return;
         }
         const t = clamp((percent - WARN_THRESHOLD) / (100 - WARN_THRESHOLD), 0, 1);
-        cardEl.style.backgroundColor = mixColor(CARD_BASE_BG, CARD_WARN_BG, t);
-        cardEl.style.borderColor = mixColor(CARD_BASE_BORDER, CARD_WARN_BORDER, t);
+        cardEl.style.backgroundColor = mixColor(BackgroundColors.card, BackgroundColors.cardWarn, t);
+        cardEl.style.borderColor = mixColor(BorderColors.card, BorderColors.cardWarn, t);
     }
 
     updateCards(data, primary) {
@@ -1544,6 +1996,10 @@ class MonitorPanel {
                 this.listUnloadedEl.appendChild(this.emptyUnloadedEl);
             }
         }
+
+        // 行移除或列表全量重建后, tooltip 可能仍挂在已脱离 DOM 的旧行上, 联动隐藏
+        if (this.tipRow && !this.tipRow.isConnected)
+            this.hideTip();
     }
 
     createRow(m, mode) {
@@ -1620,8 +2076,8 @@ class MonitorPanel {
             row.style.backgroundColor = "";
             row.style.borderColor = "";
         } else if (m.used) {
-            row.style.backgroundColor = mixColor(ROW_BASE_BG, ROW_USED_BG, 1);
-            row.style.borderColor = mixColor(ROW_BASE_BORDER, ROW_USED_BORDER, 1);
+            row.style.backgroundColor = BackgroundColors.rowUsed;
+            row.style.borderColor = BorderColors.rowUsed;
         } else {
             row.style.backgroundColor = "";
             row.style.borderColor = "";
@@ -1633,9 +2089,9 @@ class MonitorPanel {
         const loadedFrac = isRemoved ? 0 : clamp(m.loaded / total, 0, 1);
         const remainFrac = isRemoved ? 0 : clamp((m.size - m.loaded) / total, 0, 1);
         row.querySelector(".dynmon-vbar-loaded").style.width = `${loadedFrac * 100}%`;
-        row.querySelector(".dynmon-vbar-loaded").style.background = BAR_LOADED_COLOR;
+        row.querySelector(".dynmon-vbar-loaded").style.background = BackgroundColors.volumeBarLoaded;
         row.querySelector(".dynmon-vbar-model").style.width = `${remainFrac * 100}%`;
-        row.querySelector(".dynmon-vbar-model").style.background = BAR_MODEL_COLOR;
+        row.querySelector(".dynmon-vbar-model").style.background = BackgroundColors.volumeBarModel;
     }
 
     // ---------- 动作 ----------
@@ -1771,10 +2227,10 @@ class MonitorPanel {
         ctx.clearRect(0, 0, w, h);
 
         // 水平网格 (0 / 25 / 50 / 75 / 100%)
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.06)";
+        ctx.strokeStyle = BorderColors.chartGrid;
         ctx.lineWidth = 1;
         for (let p = 0; p <= 100; p += 25) {
-            const y = Math.round(h - (p / 100) * (h - 8) - 4) + 0.5;
+            const y = Math.round(h - (p / 100) * (h - 2 * CHART_PAD_Y) - CHART_PAD_Y) + 0.5;
             ctx.beginPath();
             ctx.moveTo(0, y);
             ctx.lineTo(w, y);
@@ -1785,10 +2241,13 @@ class MonitorPanel {
         if (count < 2)
             return;
         const step = w / (MAX_POINTS - 1);
-        // 最新点贴右边缘, 老点向左排布 (数据不足 MAX_POINTS 时曲线从左侧开始生长)
+        // 最新点恒贴右边缘, 历史点向左排布 (数据不足 MAX_POINTS 时曲线从右缘向左生长)
         const xAt = (i) => w - (count - 1 - i) * step;
 
         for (const s of CHART_SERIES) {
+            // 系列数值域 -> 图表高度线性映射 (超界截断到绘图区内)
+            const [dMin, dMax] = CHART_DOMAIN[s.key] ?? CHART_DOMAIN_FALLBACK;
+            const yOf = (v) => h - (clamp(v, dMin, dMax) - dMin) / (dMax - dMin) * (h - 2 * CHART_PAD_Y) - CHART_PAD_Y;
             ctx.strokeStyle = s.color;
             ctx.lineWidth = 1.5;
             ctx.beginPath();
@@ -1800,7 +2259,7 @@ class MonitorPanel {
                     continue;
                 }
                 const x = xAt(i);
-                const y = h - (clamp(v, 0, 100) / 100) * (h - 8) - 4;
+                const y = yOf(v);
                 if (!drawing) {
                     ctx.moveTo(x, y);
                     drawing = true;
@@ -1830,6 +2289,24 @@ class MonitorPanel {
         this.tipVisible = false;
         this.tipRow = null;
     }
+
+    // 行 tooltip 渲染: 纯文本按行拆分后逐行注入, 名称与路径 (前两行, 均可能换行) 之后
+    // 各插入一条 UI 分隔线; 全程 textContent 注入, 避免模型名/路径注入 HTML
+    renderRowTip(text) {
+        const tip = this.tipEl;
+        tip.textContent = "";
+        const lines = text.split("\n");
+        lines.forEach((line, i) => {
+            if (i === 1 || i === 2) {
+                const sep = document.createElement("div");
+                sep.className = "dynmon-tip-sep";
+                tip.appendChild(sep);
+            }
+            const div = document.createElement("div");
+            div.textContent = line;
+            tip.appendChild(div);
+        });
+    }
 }
 
 
@@ -1845,6 +2322,7 @@ let refreshTimer = null;
 function heartbeatTick() {
     if (!panel)
         return;
+    processDialogState(); // 对话框开关轮询: 自动最小化/还原 (不依赖 DOM 突变事件)
     // 启用开关: 每次心跳读取全局设置 (读取开销可忽略), 关闭时隐藏面板并停止取数
     const enabled = getSetting(SETTING_ENABLE, true) !== false;
     if (enabled !== panel.enabled) {
@@ -1888,33 +2366,35 @@ function scheduleRefresh() {
         } catch {
             // 忽略, 下一轮心跳会重试
         }
-    }, 350);
+    }, ACTION_REFRESH_MS);
 }
 
-// 监听 ComfyUI 设置 / 模板等对话框: 弹出时自动最小化面板, 全部关闭后自动还原
-function setupDialogWatcher() {
-    if (typeof MutationObserver === "undefined")
+// 对话框自动最小化/还原: 由心跳驱动轮询判定弹窗开关状态.
+// 弃用 MutationObserver (实测): 本版 CUI 前端的设置/模板等对话框预先创建于 DOM,
+// 仅以 display 切换可见性, 打开/关闭均无 childList 突变, observer 永不触发;
+// 心跳轮询不依赖突变事件, 对挂载式/切换式弹窗统一生效.
+// 选择器: role="dialog" 匹配新前端的对话框元素; 旧类名向后兼容其他版本与扩展弹窗.
+// 误触发防护: role="dialog" 可能命中小型浮层 (下拉列表等), 尺寸超过阈值才视为大面积弹窗;
+// 旧类名本身即模态容器, 不做尺寸过滤.
+const DIALOG_SELS = '[role="dialog"], .comfy-modal, .comfy-settings, .p-dialog';
+const DIALOG_MIN_W = 400; // role=dialog 误触发防护: 最小宽度 (px)
+const DIALOG_MIN_H = 300; // role=dialog 误触发防护: 最小高度 (px)
+
+function processDialogState() {
+    if (!panel)
         return;
-    let timer = null;
-    const DIALOG_SELS = ".p-dialog, .comfy-modal, .comfy-settings";
-    const observer = new MutationObserver(() => {
-        clearTimeout(timer);
-        timer = setTimeout(() => {
-            if (!panel)
-                return;
-            const open = Array.from(document.querySelectorAll(DIALOG_SELS))
-                .some(el => el.offsetParent !== null || getComputedStyle(el).display !== "none");
-            if (open && !panel.minimized) {
-                panel.autoMinimized = true;
-                panel.setMinimized(true);
-            } else if (!open && panel.autoMinimized) {
-                panel.autoMinimized = false;
-                if (panel.minimized)
-                    panel.setMinimized(false);
-            }
-        }, 150);
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
+    const open = Array.from(document.querySelectorAll(DIALOG_SELS))
+        .some(el => (el.offsetParent !== null || getComputedStyle(el).display !== "none")
+            && (el.getAttribute("role") !== "dialog"
+                || (el.offsetWidth > DIALOG_MIN_W && el.offsetHeight > DIALOG_MIN_H)));
+    if (open && !panel.minimized) {
+        panel.autoMinimized = true;
+        panel.setMinimized(true);
+    } else if (!open && panel.autoMinimized) {
+        panel.autoMinimized = false;
+        if (panel.minimized)
+            panel.setMinimized(false);
+    }
 }
 
 
@@ -1947,12 +2427,18 @@ app.registerExtension({
             defaultValue: DEFAULT_LANG,
             category: ["Dynamic", "Resource Monitor"],
         },
+        {
+            id: SETTING_OPACITY,
+            name: "Dynamic Resource Monitor: Panel opacity (30-100%)",
+            type: "number",
+            defaultValue: DEFAULT_OPACITY,
+            category: ["Dynamic", "Resource Monitor"],
+        },
     ],
     async setup() {
         // setup 钩子中无条件创建浮动面板 (app 就绪后触发, 不依赖任何节点);
         // 是否显示由全局启用设置在每次心跳时决定
         panel = new MonitorPanel();
-        heartbeatId = setInterval(heartbeatTick, 100);
-        setupDialogWatcher();
+        heartbeatId = setInterval(heartbeatTick, HEARTBEAT_MS); // 心跳同时驱动对话框状态轮询
     },
 });
