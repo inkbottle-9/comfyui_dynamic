@@ -14,6 +14,8 @@
   - Dynamic switch node (DynamicSwitchAnyNode)
   - Random number node (DynamicRandomNumberNode)
   - None node (DynamicNoneNode)
+  - Universal selector node (DynamicUniversalSelector)
+- Bundled resource monitor control panel (no nodes required, appears automatically on page load, see below)
 - Plugin directory = `/comfyui_dynamic`
 - **LICENSE** = `GNU Lesser General Public License v3.0`
 
@@ -21,6 +23,48 @@
 ## 2. Introduction
 
 **comfyui_dynamic adds the following nodes**
+
+- **Control Panel (Resource Monitor)**
+  - A floating resource monitoring and management panel in the browser,
+    usable without any nodes (appears automatically when the page loads)
+  - Resource monitoring
+    - Stat cards: CPU / RAM / GPU / VRAM utilization and CPU / GPU temperature (temperature full scale = 100 C)
+    - Chart: recent history of the above six series (keeps 180 sample points, window length depends on the refresh rate),
+      utilization is mapped to 0-100%, temperature to a 20-100 C window for better readability
+    - Cards fade to red above 50% usage
+  - Alerts: any temp above 90 C / VRAM almost full (free below max(2%, 512 MB))
+    / RAM free below 10% / backend disconnected
+    - The header icon is a dashboard in normal state and turns into a red warning triangle on alerts;
+      when the backend is disconnected, the subtitle shows the disconnection
+  - Model management
+    - Loaded model list: shows full details such as path / size / precision / device / status (in use or idle)
+      - Row buttons: copy full details / locate the file in the file manager / unload from RAM/VRAM (unavailable while a task is running)
+      - Green border means the model is in use, the bottom bar shows the model size relative to the primary GPU VRAM
+        (red = resident in VRAM, blue = remaining in RAM)
+    - Unloaded model list: records of models released since page load (newest first, reference only),
+      with single record removal or clear all
+    - Free VRAM: automatically deferred to after the current task when busy; RAM-resident models are not affected
+    - Free RAM: always runs immediately, even during a task; an optional "all processes" mode
+      also trims working sets of other processes (Windows, may affect running programs)
+  - Panel interactions
+    - Drag by the header; dock/undock (bottom-left, undocking restores the previous floating position);
+      minimize/restore (double-click the title); vertical maximize (fills the page height);
+      reset (default size + dock)
+    - Automatically minimizes when a large dialog (settings/templates etc.) opens, and restores after it closes
+    - Adjustable opacity (30-100%); click-through support (the panel ignores mouse events,
+      only the toggle button remains interactive)
+    - Refreshing can be paused; UI supports English and Chinese
+    - Quick links and local dirs: shortcuts to common websites, and direct access to
+      model directories registered in ComfyUI
+    - All settings persist via ComfyUI settings (localStorage fallback)
+  - Environment notes
+    - GPU monitoring (utilization/VRAM/temperature) requires an NVIDIA GPU (via NVML)
+    - CPU temperature on Windows requires LibreHardwareMonitor or OpenHardwareMonitor running;
+      without them it degrades to ACPI thermal zone temperature (reflects the motherboard zone
+      rather than CPU cores, limited accuracy), and if none is available there is no data
+    - On Linux / macOS, CPU temperature is read via psutil sensors (hardware dependent)
+
+  ![Control panel](./documents/sample__control_panel.png)
 
 - `DynamicScriptNode`
 
@@ -149,7 +193,13 @@
 
 ## 4. Dependencies
 
-- No dependencies
+- No dependencies for node execution
+- The control panel (resource monitor) requires the following Python packages
+  (installed automatically by ComfyUI when installing the plugin):
+  - `psutil`: CPU / RAM statistics (already a dependency of the ComfyUI core, declared here explicitly)
+  - `pynvml`: GPU utilization and temperature (optional, degrades automatically when missing
+    or on non-NVIDIA environments, only the monitoring feature becomes unavailable,
+    the rest of the plugin is not affected)
 
 
 ## 5. Settings
@@ -165,6 +215,15 @@
   - When disabled: No log output
   - Requires software restart after modification to take effect
   - Recommended to enable, `DynamicScriptNode` will output exceptions in a readable form to the log when execution encounters errors
+- `Dynamic Resource Monitor: Enabled`
+  - When enabled (default): The control panel is shown after the page loads
+  - When disabled: The panel is hidden and data polling stops, changes take effect immediately without restart
+- `Dynamic Resource Monitor: Refresh rate (Hz, 0 = paused)`
+  - Data polling rate of the control panel (0-10, default 2), 0 means paused, changes take effect immediately
+- `Dynamic Resource Monitor: Language`
+  - `en` (default) / `zh`, changes take effect immediately
+- `Dynamic Resource Monitor: Panel opacity (30-100%)`
+  - Default 100%, changes take effect immediately
 
 
 ## 6. Notes
