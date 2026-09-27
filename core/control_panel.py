@@ -952,6 +952,22 @@ def register_monitor_routes() -> None:
             _unloaded_models.clear()
         return web.json_response({"ok": True})
 
+    @routes.post(f"{API_PREFIX}/unloaded/remove")
+    async def monitor_unloaded_remove(request):
+        """删除单条已卸载模型记录 (uuid 定位, 不存在时幂等成功)."""
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        uuid = (body or {}).get("uuid")
+        if not uuid:
+            return web.json_response({"error": "missing uuid"}, status=400)
+        with _model_track_lock:
+            _unloaded_models[:] = [
+                m for m in _unloaded_models if m["uuid"] != uuid
+            ]
+        return web.json_response({"ok": True})
+
     @routes.get(f"{API_PREFIX}/folders")
     async def monitor_folders(request):
         """列出 folder_paths 登记的全部目录类别与实际路径 (供前端快捷下拉)."""

@@ -27,6 +27,10 @@ const MAX_OPACITY = 100;     // 面板不透明度上限 (%)
 const DEFAULT_W = 400;
 const DEFAULT_H = 600;
 
+// 垂直最大化: 面板高度撑满窗口, 顶部/底部各保留该边距 (px);
+// 高度以 calc(100vh - 2 * 本值) 经 CSS 变量注入 (见 injectStyle), 窗口缩放时自动跟随
+const VMAX_MARGIN_Y = 10;
+
 // 停靠模式专用偏移 (px): 水平 = 左侧栏探测宽度基础上的余量, 垂直 = 距窗口底部的距离
 const DOCK_OFFSET_X = 8;
 const DOCK_OFFSET_Y = 10;
@@ -66,11 +70,15 @@ const TEMP_CARD_MAX_C = 100;
 class RawColors {
     // 灰阶 (由暗到亮)
     static black__000000 = "#000000";
-    static black__00000080 = "#00000080"; // 50% 透明黑 (阴影基色)
+    static black__00000088 = "#00000088";
+    static black__00000099 = "#00000099";
+    static black__000000aa = "#000000AA";
+    static black__000000cc = "#000000CC";
     static grey__111111 = "#111111";
     static grey__222222 = "#222222";
     static grey__333333 = "#333333";
     static grey__444444 = "#444444";
+    static grey__555555 = "#555555";
     static grey__666666 = "#666666";
     static grey__777777 = "#777777";
     static grey__888888 = "#888888";
@@ -83,30 +91,56 @@ class RawColors {
     static white__ffffff = "#FFFFFF";
     static white__ffffff0f = "#FFFFFF0F"; // 6% 透明白 (折线图网格线)
     // 红
+    static red__330000 = "#330000";
     static red__660000 = "#660000";
-    static red__a04040 = "#A04040";
+    static red__660066 = "#660066";
     static red__cc0000 = "#CC0000";
+    static red__cc0066 = "#CC0066";
+    static red__ff0000 = "#ff0000";
     static red__ff6666 = "#FF6666";
+    static red__ffcccc = "#FFCCCC";
+    static red__ff6600 = "#FF6600";
+    static red__ff0066 = "#FF0066";
+    static red__ff66cc = "#FF66CC";
     static red__ff66668c = "#FF66668C"; // 55% 透明红 (占比条已加载段)
-    static red__ff6b6b = "#FF6B6B";
-    static red__f87171 = "#F87171";
+    static red__cc66ff = "#CC66FF";
+    static red__ffccff = "#FFCCFF";
+    static red__1a0a0a = "#1A0A0A"; // 淡暗红 (已卸载列表区底色占位, 后续可调)
     // 绿
-    static green__12331c = "#12331C";
-    static green__14281c = "#14281C";
-    static green__2ea043 = "#2EA043";
+    static green__002200 = "#002200";
+    static green__003300 = "#003300";
+    static green__006600 = "#006600";
+    static green__00cc00 = "#00CC00";
+    static green__00ff00 = "#00FF00";
+    static green__00ff66 = "#00FF66";
+    static green__00cc66 = "#00CC66";
+    static green__006666 = "#006666";
     static green__66ff66 = "#66FF66";
+    static green__ccff66 = "#CCFF66";
+    static green__ccffcc = "#CCFFCC";
+    static green__66cc00 = "#66CC00";
     // 蓝
-    static blue__14314a = "#14314A";
-    static blue__2d3a4dcc = "#2D3A4DCC"; // 80% 透明蓝灰 (类名徽章底)
+    static blue__000033 = "#000033";
+    static blue__111122 = "#111122";
+    static blue__000066 = "#000066";
+    static blue__0000cc = "#0000CC";
+    static blue__0000ff = "#0000FF";
     static blue__66ccff = "#66CCFF";
-    static blue__66ccff73 = "#66CCFF73"; // 45% 透明蓝 (占比条模型段)
-    static blue__7aa2f7 = "#7AA2F7";
-    static blue__9ec1e8 = "#9EC1E8";
+    static blue__66ffcc = "#66FFCC";
+    static blue__6666ff = "#6666FF";
+    static blue__0066ff = "#0066FF";
+    static blue__ccccff = "#CCCCFF";
+    static blue__ccffff = "#CCFFFF";
+    static blue__333366cc = "#006666"; // 80% 透明蓝灰 (类名徽章底)
+    static blue__66ccff66 = "#66CCFF66"; // 透明蓝 (占比条模型段)
     // 黄 / 橙
-    static yellow__4a3b12 = "#4A3B12";
-    static yellow__d29922 = "#D29922";
-    static orange__bc4c00 = "#BC4C00";
-    static orange__e36209 = "#E36209";
+    static yellow__ffcc00 = "#FFCC00";
+    static yellow__ffff00 = "#FFFF00";
+    static yellow__cccc00 = "#CCCC00";
+    static yellow__663300 = "#663300";
+    static orange__cc6600 = "#CC6600";
+    static orange__ff6600 = "#FF6600";
+    static yellow__666600 = "#666600";
 }
 Object.freeze(RawColors);
 
@@ -117,7 +151,7 @@ class ForegroundColors {
     static subtitle = RawColors.grey__999999;           // .dynmon-subtitle 标题栏副标题
     static headerButton = RawColors.grey__888888;       // .dynmon-hbtn 标题栏按钮常态
     static headerButtonHover = RawColors.white__ffffff; // .dynmon-hbtn:hover 标题栏按钮悬停
-    static alert = RawColors.red__ff6b6b;               // .dynmon-alert 标题栏告警文本
+    static alert = RawColors.red__ff6666;               // .dynmon-alert 标题栏告警文本
     // 指标卡片区
     static cardLabel = RawColors.grey__888888;          // .dynmon-card-label 卡片标签
     static cardSub = RawColors.grey__777777;            // .dynmon-card-sub 卡片副行
@@ -125,14 +159,14 @@ class ForegroundColors {
     static devices = RawColors.grey__777777;            // .dynmon-devices 设备信息行
     static legend = RawColors.grey__999999;             // .dynmon-legend 折线图图例
     // 操作区
-    static actionButton = RawColors.white__ffffff;      // .dynmon-actions button 操作按钮
-    static modelSelect = RawColors.white__ffffff;       // .dynmon-select 模型筛选下拉框
+    static actionButton = RawColors.grey__cccccc;      // .dynmon-actions button 操作按钮
+    static modelSelect = RawColors.grey__cccccc;       // .dynmon-select 模型筛选下拉框
     static aggressiveToggle = RawColors.grey__888888;   // .dynmon-aggr 激进卸载开关文本
     static sectionHeader = RawColors.grey__999999;      // .dynmon-sec-head 分区标题常态
     static sectionHeaderHover = RawColors.grey__cccccc; // .dynmon-sec-head:hover 分区标题悬停
     // 模型列表
-    static locationRemoved = RawColors.grey__777777;    // .dynmon-loc-removed 已移除徽章文本
-    static classBadge = RawColors.blue__9ec1e8;         // .dynmon-class 类名徽章文本
+    static locationRemoved = RawColors.grey__999999;    // .dynmon-loc-removed 已移除徽章文本
+    static classBadge = RawColors.blue__ccffff;         // .dynmon-class 类名徽章文本
     static fileName = RawColors.grey__eeeeee;           // .dynmon-fname 模型文件名
     static fileNameUnknown = RawColors.grey__777777;    // .dynmon-fname-unknown 未知文件名占位
     static size = RawColors.grey__999999;               // .dynmon-size 模型行大小
@@ -153,14 +187,14 @@ class ForegroundColors {
     static rateButtonHover = RawColors.white__ffffff;   // .dynmon-rate-btn:hover 步进按钮悬停
     static rateInput = RawColors.white__ffffff;         // .dynmon-rate-input 刷新率输入框
     // 消息行
-    static messageInfo = RawColors.blue__7aa2f7;        // .dynmon-msgbar 常规消息
-    static messageError = RawColors.red__f87171;        // .dynmon-msgbar.dynmon-status-err 错误消息
+    static messageInfo = RawColors.blue__6666ff;        // .dynmon-msgbar 常规消息
+    static messageError = RawColors.red__ff6666;        // .dynmon-msgbar.dynmon-status-err 错误消息
     // 弹层
     static tooltip = RawColors.grey__dddddd;            // .dynmon-tooltip 工具提示
     // 位置徽章文本 (与折线图系列同源原始色, 见 SeriesColors)
-    static locationVram = RawColors.yellow__d29922;     // .dynmon-loc-vram 徽章文本
-    static locationRam = RawColors.green__66ff66;       // .dynmon-loc-ram 徽章文本
-    static locationPartial = RawColors.blue__66ccff;    // .dynmon-loc-partial 徽章文本
+    static locationVram = RawColors.red__ffcccc;     // .dynmon-loc-vram 徽章文本
+    static locationRam = RawColors.blue__ccccff;       // .dynmon-loc-ram 徽章文本
+    static locationPartial = RawColors.red__ffccff;    // .dynmon-loc-partial 徽章文本
     // 控件
     static opacitySlider = RawColors.blue__66ccff;      // .dynmon-opacity 透明度滑杆填充 (accent-color)
 }
@@ -170,12 +204,12 @@ Object.freeze(ForegroundColors);
 class BackgroundColors {
     // 面板 / 标题栏 (标题栏四态由 headerTick 状态机消费)
     static panel = RawColors.black__000000;             // .dynmon-panel 面板主体
-    static header = RawColors.grey__333333;             // 标题栏常规 (原 HEADER_DEFAULT)
+    static header = RawColors.grey__222222;             // 标题栏常规 (原 HEADER_DEFAULT)
     static headerAlert = RawColors.red__660000;         // 标题栏警告 (温度超限 / 显存或内存告急)
-    static headerMinimized = RawColors.grey__333333;    // 标题栏最小化保持色 (原 HEADER_FLASH)
+    static headerMinimized = RawColors.grey__222222;    // 标题栏最小化保持色 (原 HEADER_FLASH)
     static headerMinimizeFlash = RawColors.red__cc0000; // 标题栏最小化瞬间起始色 (原 HEADER_FLASH_START)
     // 指标卡片区
-    static card = RawColors.grey__333333;               // .dynmon-card 基础底色 (原 CARD_BASE_BG)
+    static card = RawColors.grey__222222;               // .dynmon-card 基础底色 (原 CARD_BASE_BG)
     static cardWarn = RawColors.red__660000;            // 卡片告警混入端 (原 CARD_WARN_BG)
     static cardUsageTrack = RawColors.grey__666666;     // .dynmon-bar 卡片占用条轨道
     // 画布
@@ -189,20 +223,21 @@ class BackgroundColors {
     static rateButtonHover = RawColors.red__660000;     // .dynmon-rate-btn:hover
     static rateInput = RawColors.black__000000;         // .dynmon-rate-input 刷新率输入框
     // 模型列表
+    static unloadedSection = RawColors.red__1a0a0a;     // .dynmon-unloaded-sec 已卸载列表区整体底色
     static rowUsageTrack = RawColors.grey__222222;      // .dynmon-vbar 体积占比条轨道
-    static volumeBarModel = RawColors.blue__66ccff73;   // .dynmon-vbar-model 模型总体积段 (JS 内联)
+    static volumeBarModel = RawColors.blue__66ccff66;   // .dynmon-vbar-model 模型总体积段 (JS 内联)
     static volumeBarLoaded = RawColors.red__ff66668c;   // .dynmon-vbar-loaded 已加载段 (JS 内联)
-    static rowUsed = RawColors.green__14281c;           // .dynmon-row used 状态底色 (JS 内联)
+    static rowUsed = RawColors.green__002200;           // .dynmon-row used 状态底色 (JS 内联)
     static locationRemoved = RawColors.grey__333333;    // .dynmon-loc-removed 已移除徽章底
-    static locationVram = RawColors.yellow__4a3b12;     // .dynmon-loc-vram 徽章底
-    static locationRam = RawColors.green__12331c;       // .dynmon-loc-ram 徽章底
-    static locationPartial = RawColors.blue__14314a;    // .dynmon-loc-partial 徽章底
-    static classBadge = RawColors.blue__2d3a4dcc;       // .dynmon-class 类名徽章底
+    static locationVram = RawColors.red__660000;     // .dynmon-loc-vram 徽章底
+    static locationRam = RawColors.blue__0000cc;       // .dynmon-loc-ram 徽章底
+    static locationPartial = RawColors.red__660066;    // .dynmon-loc-partial 徽章底
+    static classBadge = RawColors.blue__333366cc;       // .dynmon-class 类名徽章底
     // 消息行 / 状态栏
-    static messageBar = RawColors.grey__333333;         // .dynmon-msgbar 消息行底
-    static statusBar = RawColors.grey__333333;          // .dynmon-statusbar 状态栏底
+    static messageBar = RawColors.grey__222222;         // .dynmon-msgbar 消息行底
+    static statusBar = RawColors.grey__222222;          // .dynmon-statusbar 状态栏底
     // 弹层
-    static tooltip = RawColors.grey__111111;            // .dynmon-tooltip 工具提示底
+    static tooltip = RawColors.blue__111122;            // .dynmon-tooltip 工具提示底
 }
 Object.freeze(BackgroundColors);
 
@@ -211,7 +246,7 @@ class BorderColors {
     // 面板 / 标题栏
     static panel = RawColors.grey__333333;              // .dynmon-panel 面板外框
     static header = RawColors.grey__333333;             // .dynmon-header 下边框静态初值 (运行时由背景色衍生覆盖)
-    static card = RawColors.grey__666666;               // .dynmon-card 描边 (原 CARD_BASE_BORDER)
+    static card = RawColors.grey__333333;               // .dynmon-card 描边 (原 CARD_BASE_BORDER)
     static cardWarn = RawColors.red__cc0000;            // 卡片告警混入端 (原 CARD_WARN_BORDER)
     static chartCanvas = RawColors.grey__222222;        // 折线图画布描边 (原 border-soft)
     static chartGrid = RawColors.white__ffffff0f;       // canvas 网格线 (原 CHART_GRID_COLOR)
@@ -224,18 +259,18 @@ class BorderColors {
     static rateStepperDivider = RawColors.grey__333333; // 步进按钮间 inset 分隔线
     static rateInput = RawColors.grey__333333;          // .dynmon-rate-input 描边
     // 模型列表
-    static row = RawColors.grey__666666;                // .dynmon-row 描边
-    static rowUsed = RawColors.green__2ea043;           // .dynmon-row used 状态描边 (JS 内联)
+    static row = RawColors.grey__444444;                // .dynmon-row 描边
+    static rowUsed = RawColors.green__00cc00;           // .dynmon-row used 状态描边 (JS 内联)
     static rowHover = RawColors.blue__66ccff;           // .dynmon-row:hover 悬停描边 (原 focus)
     static rowButton = RawColors.grey__333333;          // .dynmon-row-btns button 描边 (disabled:hover 复用)
     static rowButtonHover = RawColors.grey__cccccc;     // 行按钮悬停描边 (原 border-btn-hover-strong)
     static unloadButton = RawColors.red__660000;        // 行卸载按钮描边常态
-    static unloadButtonHover = RawColors.red__a04040;   // 行卸载按钮描边悬停
+    static unloadButtonHover = RawColors.red__ff0000;   // 行卸载按钮描边悬停
     static unloadAllButton = RawColors.red__660000;     // .dynmon-sec-btn 卸载全部按钮描边
-    static unloadAllButtonHover = RawColors.red__a04040; // 卸载全部按钮描边悬停
-    static unloadedSectionDivider = RawColors.grey__444444; // .dynmon-unloaded-sec 顶部分隔线 (已加载/已卸载列表分界)
+    static unloadAllButtonHover = RawColors.red__ff0000; // 卸载全部按钮描边悬停
+    static unloadedSectionDivider = RawColors.grey__333333; // .dynmon-unloaded-sec 顶部分隔线 (已加载/已卸载列表分界)
     // 状态栏
-    static statusBarItemSeparator = RawColors.grey__444444; // .dynmon-sb-item 左侧分隔线
+    static statusBarItemSeparator = RawColors.grey__333333; // .dynmon-sb-item 左侧分隔线
     // 弹层
     static tooltip = RawColors.blue__66ccff;            // .dynmon-tooltip 描边 (原 focus)
     static tooltipSeparator = RawColors.grey__666666;   // .dynmon-tip-sep 提示内分隔线
@@ -244,19 +279,19 @@ Object.freeze(BorderColors);
 
 // ---------- 映射层: 阴影 (几何 + 颜色层透明黑合成, 颜色改动只动颜色层) ----------
 class ShadowColors {
-    static panel = `0 4px 12px ${RawColors.black__00000080}`;   // .dynmon-panel 投影
-    static tooltip = `0 4px 16px ${RawColors.black__00000080}`; // .dynmon-tooltip 投影
+    static panel = `0 2px 16px ${RawColors.black__000000cc}`;   // .dynmon-panel 投影
+    static tooltip = `0 2px 16px ${RawColors.black__000000cc}`; // .dynmon-tooltip 投影
 }
 Object.freeze(ShadowColors);
 
 // ---------- 映射层: 折线图系列 (画布曲线 / 图例圆点 / 卡片占用条, 仅 JS 引用不注入) ----------
 class SeriesColors {
     static cpu = RawColors.blue__66ccff;
-    static ram = RawColors.green__66ff66;
-    static gpu = RawColors.red__ff6666;
-    static vram = RawColors.yellow__d29922;
-    static cpuTemp = RawColors.orange__e36209;
-    static gpuTemp = RawColors.orange__bc4c00;
+    static ram = RawColors.blue__0066ff;
+    static gpu = RawColors.blue__66ffcc;
+    static vram = RawColors.red__cc0066;
+    static cpuTemp = RawColors.green__66cc00;
+    static gpuTemp = RawColors.yellow__ffcc00;
 }
 Object.freeze(SeriesColors);
 
@@ -284,7 +319,7 @@ const QUICK_LINKS = [
     { label: "Comfy-Org (HF)", url: "https://huggingface.co/Comfy-Org" },
     { label: "Hugging Face", url: "https://huggingface.co" },
     { label: "Civitai", url: "https://civitai.com" },
-    { label: "Civitai (mirror)", url: "https://civitai.red" },
+    { label: "Civitai (red)", url: "https://civitai.red" },
     { label: "CivArchive", url: "https://civarchive.com" },
     { label: "OpenModelDB", url: "https://openmodeldb.info" },
     { label: "comfyui_dynamic (GitHub)", url: REPO_URL },
@@ -351,6 +386,10 @@ const ICONS = {
     // 关闭态显示带斜线的指针 (点击开启穿透), 开启态显示普通指针 (点击恢复拦截)
     pointerOff: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/><path d="M2 2l20 20"/></svg>',
     pointer: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/></svg>',
+    // 垂直最大化按钮 (Windows 窗口最大化风格):
+    // 常态单矩形 (点击撑满), 最大化态双矩形还原形 (点击恢复原高度), 与 Windows 按钮图标约定一致
+    vmax: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="6" width="16" height="12"/></svg>',
+    vmaxRestore: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="9" width="11" height="11"/><path d="M9 9V4h11v11h-5"/></svg>',
 };
 
 
@@ -369,6 +408,8 @@ const LANGS = {
         undockTip: "Undock: restore previous floating position",
         minimizeTip: "Minimize (double-click title)",
         restoreTip: "Restore",
+        vmaxTip: "Vertical maximize: fill page height",
+        vmaxRestoreTip: "Restore panel height (vertically maximized)",
         backendDown: "Backend disconnected",
         passthroughTipOn: "Click-through is ON (panel ignores mouse, except this button). Click to disable",
         passthroughTipOff: "Click-through is OFF. Click to let mouse events pass through the panel",
@@ -384,41 +425,58 @@ const LANGS = {
         alertVram: (b) => `VRAM almost full (free ${b})`,
         alertRam: (b) => `RAM almost full (free ${b})`,
         helpTitle: "Resource Monitor - comfyui_dynamic",
-        // 帮助文案中的数值直接插值顶部常量, 避免双份维护 (未列出的除外)
+        // 帮助文案中的数值直接插值顶部常量, 避免双份维护 (未列出的除外);
+        // 版式约定: 冒号引导的分组标题独占一行 (冒号后换行), 同组内以分号间隔的条目逐行排列,
+        // 斜杠间隔的并列项保持单行 (tooltip 为 white-space: pre-wrap, \n 直接生效)
         helpText: [
             "Resource monitor floating panel from the comfyui_dynamic plugin.",
             "",
-            "Cards: CPU / RAM / GPU / VRAM utilization and CPU / GPU temperature "
-            + "(temperature full scale = " + TEMP_CARD_MAX_C + " C). "
-            + "Card background/border fade to red above " + WARN_THRESHOLD + "% usage.",
-            "Chart: history of all six series above; utilization is mapped to 0-100%, "
-            + "temperature to a " + CHART_DOMAIN.cpu_temp[0] + "-" + CHART_DOMAIN.cpu_temp[1]
-            + " C window for better visibility.",
+            "Cards:",
+            "CPU / RAM / GPU / VRAM utilization and CPU / GPU temperature "
+            + "(temperature full scale = " + TEMP_CARD_MAX_C + " C)",
+            "Card background/border fade to red above " + WARN_THRESHOLD + "% usage",
+            "Chart:",
+            "History of all six series above",
+            "Utilization is mapped to 0-100%, temperature to a "
+            + CHART_DOMAIN.cpu_temp[0] + "-" + CHART_DOMAIN.cpu_temp[1]
+            + " C window for better visibility",
             "",
-            "Loaded models: green border = in use; bottom bar shows model size relative to the "
-            + "primary GPU VRAM (red = resident in VRAM, blue = remaining in RAM).",
-            "Row buttons: copy full details / locate the file in the file manager / unload from VRAM.",
-            "Unloaded models: models released since page load (newest first, reference only).",
+            "Loaded models:",
+            "Green border = in use",
+            "Bottom bar shows model size relative to the primary GPU VRAM "
+            + "(red = resident in VRAM, blue = remaining in RAM)",
+            "Row buttons:",
+            "Copy full details / locate the file in the file manager / unload from VRAM",
+            "Unloaded models:",
+            "Models released since page load (newest first, reference only)",
             "",
-            "Header: the icon left of the title is a dashboard in normal state and a red warning "
-            + "triangle on alerts - any temp above " + ALERT_TEMP_C + " C, VRAM almost full, "
-            + "RAM free below " + Math.round(RAM_MIN_FREE_FRACTION * 100) + "%, or the backend "
-            + "disconnected (the subtitle then shows the disconnection). "
-            + "Red flash = just minimized.",
-            "Header buttons: help (this text) / click-through toggle / pause / reset "
-            + "(default size + dock) / dock toggle / minimize. Double-click the title to "
-            + "minimize; drag to move. Click-through makes the panel ignore all mouse events "
-            + "except its toggle button.",
+            "Header:",
+            "The icon left of the title is a dashboard in normal state and a red warning triangle on alerts",
+            "Alerts:",
+            "Any temp above " + ALERT_TEMP_C + " C / VRAM almost full / RAM free below "
+            + Math.round(RAM_MIN_FREE_FRACTION * 100) + "% / backend disconnected "
+            + "(the subtitle then shows the disconnection)",
+            "Red flash = just minimized",
+            "Header buttons:",
+            "Help (this text) / click-through toggle / pause / reset (default size + dock) "
+            + "/ dock toggle / vertical maximize / minimize",
+            "Double-click the title to minimize",
+            "Drag to move",
+            "Click-through makes the panel ignore all mouse events except its toggle button",
             "",
-            "Actions: Free VRAM defers to after the current task when busy; "
-            + "Free RAM always runs immediately, even during a task.",
+            "Actions:",
+            "Free VRAM defers to after the current task when busy",
+            "Free RAM always runs immediately, even during a task",
             "",
-            "Status bar: language / opacity (" + MIN_OPACITY + "-" + MAX_OPACITY + "%) / refresh "
-            + "rate (0-" + RATE_MAX + " Hz, 0 = paused) / mouse position / panel position and size.",
-            "Settings persist via ComfyUI settings (localStorage fallback).",
+            "Status bar:",
+            "Language / opacity (" + MIN_OPACITY + "-" + MAX_OPACITY + "%) / refresh rate (0-"
+            + RATE_MAX + " Hz, 0 = paused) / mouse position / panel position and size",
+            "Settings persist via ComfyUI settings (localStorage fallback)",
             "",
-            "This ? button: single-click copies this help text to the clipboard; "
-            + "double-click opens the project GitHub repository: " + REPO_URL,
+            "This ? button:",
+            "Single-click copies this help text to the clipboard",
+            "Double-click opens the project GitHub repository:",
+            REPO_URL,
         ].join("\n"),
         langTip: "UI language",
         rateTip: "Refresh rate (0-" + RATE_MAX + " Hz, 0 = paused)",
@@ -447,6 +505,9 @@ const LANGS = {
         copyTip: "Copy full details",
         openTip: "Locate the file in file manager",
         unloadTip: "Unload this model from RAM/VRAM (unavailable while busy)",
+        removeRecordTip: "Remove this record from the list",
+        recordRemoved: "Record removed",
+        removeFail: (m) => `Remove failed: ${m}`,
         pathUnknown: "(path unknown)",
         location: { vram: "VRAM", partial: "Mixed", ram: "RAM" },
         stateUsed: "in use",
@@ -504,6 +565,8 @@ const LANGS = {
         undockTip: "退出停靠: 恢复之前的浮动位置",
         minimizeTip: "最小化 (可双击标题栏)",
         restoreTip: "还原",
+        vmaxTip: "垂直最大化: 高度撑满页面",
+        vmaxRestoreTip: "还原面板高度 (当前垂直最大化)",
         backendDown: "后端已断连",
         passthroughTipOn: "点击穿透已开启 (面板忽略鼠标, 仅本按钮可交互). 点击关闭",
         passthroughTipOff: "点击穿透已关闭. 点击开启后, 鼠标事件将穿透面板直达下层内容",
@@ -518,37 +581,54 @@ const LANGS = {
         alertVram: (b) => `显存告急 (剩余 ${b})`,
         alertRam: (b) => `内存告急 (剩余 ${b})`,
         helpTitle: "资源监控 - comfyui_dynamic",
-        // 帮助文案中的数值直接插值顶部常量, 避免双份维护 (未列出的除外)
+        // 帮助文案中的数值直接插值顶部常量, 避免双份维护 (未列出的除外);
+        // 版式约定与 en 基准一致: 冒号引导的分组标题独占一行, 分号间隔的条目逐行排列
         helpText: [
             "comfyui_dynamic 插件自带的资源监控浮动面板.",
             "",
-            "统计卡片: CPU / RAM / GPU / VRAM 利用率与 CPU / GPU 温度 "
-            + "(温度满量程 = " + TEMP_CARD_MAX_C + " C). "
-            + "占用超过 " + WARN_THRESHOLD + "% 后卡片背景与描边渐变为红色.",
-            "折线图: 上述六个系列的近期历史; 利用率映射到 0-100%, 温度映射到 "
-            + CHART_DOMAIN.cpu_temp[0] + "-" + CHART_DOMAIN.cpu_temp[1] + " C 窗口以提高可读性.",
+            "统计卡片:",
+            "CPU / RAM / GPU / VRAM 利用率与 CPU / GPU 温度 (温度满量程 = " + TEMP_CARD_MAX_C + " C)",
+            "占用超过 " + WARN_THRESHOLD + "% 后卡片背景与描边渐变为红色",
+            "折线图:",
+            "上述六个系列的近期历史",
+            "利用率映射到 0-100%, 温度映射到 "
+            + CHART_DOMAIN.cpu_temp[0] + "-" + CHART_DOMAIN.cpu_temp[1] + " C 窗口以提高可读性",
             "",
-            "已加载模型: 绿色边框 = 正在使用; 底部横条显示模型体积与主 GPU 显存的比例 "
-            + "(红色 = 已加载进显存, 蓝色 = 仍在内存的部分).",
-            "行按钮: 复制完整信息 / 在文件管理器中定位文件 / 从显存卸载.",
-            "已卸载模型: 页面打开后被释放的模型记录 (最新在前, 仅供参考).",
+            "已加载模型:",
+            "绿色边框 = 正在使用",
+            "底部横条显示模型体积与主 GPU 显存的比例 (红色 = 已加载进显存, 蓝色 = 仍在内存的部分)",
+            "行按钮:",
+            "复制完整信息 / 在文件管理器中定位文件 / 从显存卸载",
+            "已卸载模型:",
+            "页面打开后被释放的模型记录 (最新在前, 仅供参考)",
             "",
-            "标题栏: 主标题左侧图标常态为仪表盘, 出现警告时变为红色三角 - "
-            + "任一温度超过 " + ALERT_TEMP_C + " C / 显存告急 / 内存剩余不足 "
+            "标题栏:",
+            "主标题左侧图标常态为仪表盘, 出现警告时变为红色三角",
+            "警告条件:",
+            "任一温度超过 " + ALERT_TEMP_C + " C / 显存告急 / 内存剩余不足 "
             + Math.round(RAM_MIN_FREE_FRACTION * 100) + "% / 后端断连 "
-            + "(断连时副标题显示断连提示); 红色闪动 = 刚被最小化.",
-            "标题栏按钮: 帮助 (本段文本) / 点击穿透切换 / 暂停 / 重置 (默认尺寸 + 停靠) / "
-            + "停靠切换 / 最小化; 双击标题栏触发最小化, 按住可拖动. "
-            + "点击穿透开启后, 面板忽略除该按钮外的全部鼠标事件.",
+            + "(断连时副标题显示断连提示)",
+            "红色闪动 = 刚被最小化",
+            "标题栏按钮:",
+            "帮助 (本段文本) / 点击穿透切换 / 暂停 / 重置 (默认尺寸 + 停靠) "
+            + "/ 停靠切换 / 垂直最大化 / 最小化",
+            "双击标题栏触发最小化",
+            "按住可拖动",
+            "点击穿透开启后, 面板忽略除该按钮外的全部鼠标事件",
             "",
-            "清理按钮: 清理显存在任务执行中会延迟到任务结束后自动执行; "
-            + "清理内存始终立即生效, 即使任务执行中.",
+            "清理按钮:",
+            "清理显存在任务执行中会延迟到任务结束后自动执行",
+            "清理内存始终立即生效, 即使任务执行中",
             "",
-            "状态栏: 语言 / 不透明度 (" + MIN_OPACITY + "-" + MAX_OPACITY + "%) / 刷新率 "
-            + "(0-" + RATE_MAX + " Hz, 0 = 暂停) / 鼠标位置 / 面板位置与尺寸.",
-            "设置项持久化到 ComfyUI 设置 (无 API 时回退 localStorage).",
+            "状态栏:",
+            "语言 / 不透明度 (" + MIN_OPACITY + "-" + MAX_OPACITY + "%) / 刷新率 (0-"
+            + RATE_MAX + " Hz, 0 = 暂停) / 鼠标位置 / 面板位置与尺寸",
+            "设置项持久化到 ComfyUI 设置 (无 API 时回退 localStorage)",
             "",
-            "本 ? 按钮: 单击复制本段帮助文本到剪贴板; 双击打开项目 GitHub 仓库: " + REPO_URL,
+            "本 ? 按钮:",
+            "单击复制本段帮助文本到剪贴板",
+            "双击打开项目 GitHub 仓库:",
+            REPO_URL,
         ].join("\n"),
         langTip: "界面语言",
         rateTip: "刷新率 (0-" + RATE_MAX + " Hz, 0 = 暂停)",
@@ -577,6 +657,9 @@ const LANGS = {
         copyTip: "复制完整信息",
         openTip: "在文件管理器中定位该文件",
         unloadTip: "从内存/显存中卸载该模型 (任务执行中不可用)",
+        removeRecordTip: "删除该条记录",
+        recordRemoved: "已删除该条记录",
+        removeFail: (m) => `删除失败: ${m}`,
         pathUnknown: "(路径未知)",
         location: { vram: "显存", partial: "混合", ram: "内存" },
         stateUsed: "使用中",
@@ -811,6 +894,9 @@ const CSS = `
     background: var(--dynmon-background-panel); border: 1px solid var(--dynmon-border-panel); border-radius: 8px; overflow: hidden;
     box-shadow: var(--dynmon-shadow-panel); z-index: var(--dynmon-z-panel); resize: both;
     color: var(--dynmon-foreground-panel); font-family: sans-serif; font-size: 12px; user-select: none; }
+/* 垂直最大化: 高度撑满窗口 (上下边距经 --dynmon-vmax-h 扣除), !important 覆盖内联高度;
+   需置于 .dynmon-min 之前: 两类同特异性, 后者 (height auto) 胜出, 保证最小化始终优先 */
+.dynmon-panel.dynmon-vmax { height: var(--dynmon-vmax-h) !important; }
 .dynmon-panel.dynmon-min { min-width: 0; min-height: 0; max-width: none; max-height: none;
     width: auto !important; height: auto !important; resize: none; }
 /* 折叠后仅剩标题栏: 隐藏与主体间的分界线 (标题栏渐变循环仅内联写边框颜色,
@@ -861,11 +947,16 @@ const CSS = `
 .dynmon-actions-right { margin-left: auto; display: inline-flex; gap: 6px; flex: none; }
 .dynmon-select { width: 120px; background: var(--dynmon-background-model-select); color: var(--dynmon-foreground-model-select); border: 1px solid var(--dynmon-border-model-select); }
 .dynmon-models { padding: 0 8px 8px; }
+/* 列表区: 已加载/已卸载两分区的共同父容器, 承载二者合计的可分配垂直空间;
+   已卸载区的 max-height 50% 以本容器为基准解析, 语义为 "列表区的一半" 而非整个内容区的一半
+   (无此包裹层时 50% 按整个内容区解析, 固定元素越高偏差越大) */
+.dynmon-lists { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .dynmon-loaded-sec { flex: 1 1 auto; min-height: 60px; display: flex; flex-direction: column; }
 /* 已卸载区: 未展开/条目少时保持内容高度 (flex none, 已加载区 flex 1 1 auto 吃掉全部剩余空间);
-   条目多时封顶容器一半高度 (max-height 50%), 超出部分转入列表内部滚动,
+   条目多时封顶列表区一半高度 (max-height 50% 以 .dynmon-lists 为基准), 超出部分转入列表内部滚动,
    顶部灰色分隔线增强与已加载列表的分界可读性 */
 .dynmon-unloaded-sec { flex: none; max-height: 50%; display: flex; flex-direction: column;
+    background: var(--dynmon-background-unloaded-section);
     border-top: 1px solid var(--dynmon-border-unloaded-section-divider); }
 .dynmon-unloaded-sec .dynmon-list { flex: 0 1 auto; overflow-y: auto; min-height: 0; }
 .dynmon-sec-head { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--dynmon-foreground-section-header); padding: 2px; cursor: pointer; }
@@ -901,11 +992,12 @@ const CSS = `
 .dynmon-row-btns button { background: transparent; color: var(--dynmon-foreground-row-button); border: 1px solid var(--dynmon-border-row-button); border-radius: 4px;
     width: 22px; height: 20px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; }
 .dynmon-row-btns button:hover { color: var(--dynmon-foreground-row-button-hover); border-color: var(--dynmon-border-row-button-hover); }
-.dynmon-row-btns button[data-act="unload"] { color: var(--dynmon-foreground-unload-button); border-color: var(--dynmon-border-unload-button); }
-.dynmon-row-btns button[data-act="unload"]:hover { color: var(--dynmon-foreground-unload-button-hover); border-color: var(--dynmon-border-unload-button-hover); }
+/* 卸载按钮与删除记录按钮共用同一红色样式 (两列表第三按钮外观完全对称, 仅功能不同) */
+.dynmon-row-btns button[data-act="unload"], .dynmon-row-btns button[data-act="remove"] { color: var(--dynmon-foreground-unload-button); border-color: var(--dynmon-border-unload-button); }
+.dynmon-row-btns button[data-act="unload"]:hover, .dynmon-row-btns button[data-act="remove"]:hover { color: var(--dynmon-foreground-unload-button-hover); border-color: var(--dynmon-border-unload-button-hover); }
 .dynmon-row-btns button:disabled { opacity: .35; cursor: not-allowed; }
 .dynmon-row-btns button:disabled:hover { color: var(--dynmon-foreground-row-button); border-color: var(--dynmon-border-row-button); } /* disabled hover 恢复常态色 */
-.dynmon-row-btns button:disabled[data-act="unload"]:hover { color: var(--dynmon-foreground-unload-button); border-color: var(--dynmon-border-unload-button); }
+.dynmon-row-btns button:disabled[data-act="unload"]:hover, .dynmon-row-btns button:disabled[data-act="remove"]:hover { color: var(--dynmon-foreground-unload-button); border-color: var(--dynmon-border-unload-button); }
 .dynmon-busy .dynmon-row-btns button[data-act="unload"] { opacity: .35; }
 .dynmon-empty { font-size: 11px; color: var(--dynmon-foreground-empty-hint); text-align: center; padding: 10px; }
 .dynmon-tooltip { position: fixed; z-index: var(--dynmon-z-tip); background: var(--dynmon-background-tooltip); border: 1px solid var(--dynmon-border-tooltip); color: var(--dynmon-foreground-tooltip); font-size: 11px; line-height: 1.5; padding: 8px 10px; border-radius: 6px; pointer-events: none; white-space: pre-wrap; word-break: break-all; overflow-wrap: anywhere; display: none; min-width: 120px; max-width: 480px; box-shadow: var(--dynmon-shadow-tooltip); }
@@ -944,9 +1036,10 @@ function injectStyle() {
     const root = document.documentElement.style;
     root.setProperty("--dynmon-w-default", `${DEFAULT_W}px`);   // 面板默认尺寸
     root.setProperty("--dynmon-h-default", `${DEFAULT_H}px`);
+    root.setProperty("--dynmon-vmax-h", `calc(100vh - ${VMAX_MARGIN_Y * 2}px)`); // 垂直最大化高度
     // 颜色变量: 遍历映射层静态类批量注入, 变量名派生规则 --dynmon-<组前缀>-<kebabCase(键)>;
     // SeriesColors 仅 JS 内联引用 (折线图绘制), 不注入 CSS
-    const injected = new Set(["--dynmon-w-default", "--dynmon-h-default"]);
+    const injected = new Set(["--dynmon-w-default", "--dynmon-h-default", "--dynmon-vmax-h"]);
     for (const [cls, prefix] of COLOR_GROUPS) {
         for (const key of Object.getOwnPropertyNames(cls)) {
             if (CLASS_BUILTIN_KEYS.has(key) || typeof cls[key] !== "string")
@@ -1036,9 +1129,12 @@ class MonitorPanel {
         this.helpClickAt = 0;     // 帮助按钮上一次点击时刻 (双击判定, 见 handleHelpClick)
         this.helpClickTimer = null; // 挂起的单击复制动作定时器
         this.minimized = false;  // 最小化状态 (显式初始化, 不依赖 undefined 隐式行为)
+        this.vmax = false;       // 垂直最大化状态 (高度撑满窗口, 见 setVerticalMax)
         this.passthrough = false;       // 点击穿透开关 (开启时面板放行除切换按钮外的全部鼠标事件)
         this.autoMinPrevDocked = false; // 弹窗触发自动最小化前的停靠状态 (关闭弹窗后完整还原用)
         this.savedSize = null;   // 最小化前的尺寸 { w, h }
+        this.savedVMaxSize = null; // 垂直最大化前的内联高度原值 (style.height, 还原用)
+        this.savedVMaxTop = null;  // 垂直最大化前的内联 top 快照 (还原兜底, 浮动态优先用 floatPos 记忆)
         this.docked = false;     // 是否处于停靠模式 (左下角, 随窗口尺寸变化保持贴合)
         this.floatPos = null;    // 浮动状态坐标记忆 { left, top } (仅浮动态更新, 供退出停靠时恢复)
         this.opacity = clamp(parseInt(getSetting(SETTING_ID__OPACITY, DEFAULT_OPACITY), 10) || DEFAULT_OPACITY,
@@ -1098,6 +1194,7 @@ class MonitorPanel {
                     <button class="dynmon-hbtn" data-hact="pause" title=""></button>
                     <button class="dynmon-hbtn" data-hact="reset" title="">↺</button>
                     <button class="dynmon-hbtn" data-hact="dock" title="">↙</button>
+                    <button class="dynmon-hbtn" data-hact="vmax" title=""></button>
                     <button class="dynmon-hbtn" data-hact="min" title="">–</button>
                 </span>
             </div>
@@ -1115,21 +1212,23 @@ class MonitorPanel {
                         <select class="dynmon-select dynmon-dirs"></select>
                     </span>
                 </div>
-                <div class="dynmon-models dynmon-loaded-sec">
-                    <div class="dynmon-sec-head" data-sec="loaded">
-                        <span class="dynmon-chev">▼</span>
-                        <span class="dynmon-count"></span>
-                        <button class="dynmon-sec-btn" data-act="unload-all"></button>
+                <div class="dynmon-lists">
+                    <div class="dynmon-models dynmon-loaded-sec">
+                        <div class="dynmon-sec-head" data-sec="loaded">
+                            <span class="dynmon-chev">▼</span>
+                            <span class="dynmon-count"></span>
+                            <button class="dynmon-sec-btn" data-act="unload-all"></button>
+                        </div>
+                        <div class="dynmon-list dynmon-list-loaded"></div>
                     </div>
-                    <div class="dynmon-list dynmon-list-loaded"></div>
-                </div>
-                <div class="dynmon-models dynmon-unloaded-sec dynmon-sec-collapsed">
-                    <div class="dynmon-sec-head" data-sec="unloaded">
-                        <span class="dynmon-chev">▼</span>
-                        <span class="dynmon-count-unloaded"></span>
-                        <button class="dynmon-sec-btn" data-act="clear-unloaded"></button>
+                    <div class="dynmon-models dynmon-unloaded-sec dynmon-sec-collapsed">
+                        <div class="dynmon-sec-head" data-sec="unloaded">
+                            <span class="dynmon-chev">▼</span>
+                            <span class="dynmon-count-unloaded"></span>
+                            <button class="dynmon-sec-btn" data-act="clear-unloaded"></button>
+                        </div>
+                        <div class="dynmon-list dynmon-list-unloaded"></div>
                     </div>
-                    <div class="dynmon-list dynmon-list-unloaded"></div>
                 </div>
             </div>
             <div class="dynmon-msgbar"></div>
@@ -1209,6 +1308,7 @@ class MonitorPanel {
         this.helpBtn = panel.querySelector('[data-hact="help"]');
         this.resetBtn = panel.querySelector('[data-hact="reset"]');
         this.dockBtn = panel.querySelector('[data-hact="dock"]');
+        this.vmaxBtn = panel.querySelector('[data-hact="vmax"]');
         this.minBtn = panel.querySelector('[data-hact="min"]');
         this.ramBtn = panel.querySelector('[data-act="clean-ram"]');
         this.vramBtn = panel.querySelector('[data-act="clean-vram"]');
@@ -1266,7 +1366,7 @@ class MonitorPanel {
     }
 
     bindEvents() {
-        // 标题栏按钮: 帮助 / 暂停 / 重置 / 停靠 / 最小化
+        // 标题栏按钮: 帮助 / 暂停 / 重置 / 停靠 / 垂直最大化 / 最小化
         this.panel.addEventListener("click", (e) => {
             const btn = e.target.closest(".dynmon-hbtn[data-hact]");
             if (!btn)
@@ -1281,6 +1381,8 @@ class MonitorPanel {
                 this.resetLayout();
             else if (act === "dock")
                 this.toggleDock();
+            else if (act === "vmax")
+                this.toggleVerticalMax();
             else if (act === "passthrough")
                 this.setPassthrough(!this.passthrough);
             else if (act === "min")
@@ -1328,7 +1430,9 @@ class MonitorPanel {
             }
             this.positioned = true;
             this.panel.style.left = `${ev.clientX - dragX}px`;
-            this.panel.style.top = `${ev.clientY - dragY}px`;
+            // 垂直最大化: 高度由窗口决定, 拖动仅水平移动 (垂直位置锁定在最大化位置)
+            if (!this.vmax)
+                this.panel.style.top = `${ev.clientY - dragY}px`;
             this.panel.style.right = "auto";
             this.panel.style.bottom = "auto";
             this.clampHeaderIntoWindow();
@@ -1541,21 +1645,73 @@ class MonitorPanel {
         const w = header.offsetWidth;
         const h = header.offsetHeight;
         const left = clamp(this.panel.offsetLeft, EDGE, window.innerWidth - w - EDGE);
-        const top = clamp(this.panel.offsetTop, EDGE, window.innerHeight - h - EDGE);
+        // 垂直最大化: 垂直位置恒为最大化顶边, 不做夹取计算
+        const top = this.vmax ? VMAX_MARGIN_Y
+            : clamp(this.panel.offsetTop, EDGE, window.innerHeight - h - EDGE);
         this.panel.style.left = `${left}px`;
         this.panel.style.top = `${top}px`;
-        // 仅浮动态更新记忆坐标 (停靠态不覆盖, 保证退出停靠能回到原浮动位置)
-        if (!this.docked)
-            this.floatPos = { left, top };
+        // 仅浮动态更新记忆坐标 (停靠态不覆盖, 保证退出停靠能回到原浮动位置);
+        // 垂直最大化: floatPos 的垂直记忆保留不擦除 (顶边不是用户的浮动位置记忆,
+        // 水平随拖动/夹取正常刷新)
+        if (!this.docked) {
+            const memTop = this.vmax && this.floatPos ? this.floatPos.top : top;
+            this.floatPos = { left, top: memTop };
+        }
     }
 
     // 重置 = 恢复默认尺寸 + 进入停靠模式 (与初始位置语义一致)
     resetLayout() {
         if (this.minimized)
             this.setMinimized(false);
+        this.setVerticalMax(false); // 先退出垂直最大化, 避免类样式 !important 覆盖下面的内联高度
         this.panel.style.width = `${DEFAULT_W}px`;
         this.panel.style.height = `${DEFAULT_H}px`;
         this.dockBottomLeft();
+    }
+
+    // 垂直最大化开关 (on = 高度撑满窗口, 上下各留 VMAX_MARGIN_Y; 类似 Windows 顶边双击的垂直最大化):
+    // 以 CSS 类 + !important 实现, 内联高度原样保留 (还原时直接恢复, 不做计算备份);
+    // 记录内联 top 作恢复兜底; 浮动态还原时垂直位置以 floatPos 记忆为准 (vmax 期间可能停靠往返),
+    // 停靠态由 applyDockPosition 依新高度重贴;
+    // 与最小化互斥: 折叠态点击最大化先展开, 最小化时先退出最大化 (均经 setMinimized/setVerticalMax 入口保证)
+    setVerticalMax(on) {
+        if (this.vmax === on)
+            return;
+        // 折叠态点击最大化: 先展开再最大化 (与 Windows 对最小化窗口点击最大化等效);
+        // 否则 dynmon-min 的 height auto !important (规则置后) 会压过 dynmon-vmax, 面板保持折叠
+        if (on && this.minimized)
+            this.setMinimized(false);
+        this.vmax = on;
+        const panel = this.panel;
+        if (on) {
+            this.savedVMaxSize = panel.style.height; // 内联高度原值 (含原生 resize 写入的值)
+            this.savedVMaxTop = panel.style.top;
+            panel.classList.add("dynmon-vmax");
+            if (!this.docked)
+                panel.style.top = `${VMAX_MARGIN_Y}px`; // 顶边对齐窗口上缘, 高度变量补足撑满
+        } else {
+            panel.classList.remove("dynmon-vmax");
+            if (this.savedVMaxSize !== null)
+                panel.style.height = this.savedVMaxSize;
+            // 垂直位置恢复: 浮动态以 floatPos 记忆为准 (savedVMaxTop 是按下最大化那一刻的
+            // top 快照, vmax 期间经历停靠往返后已过期; floatPos 垂直分量在 vmax 态被完整保留),
+            // 无 floatPos 时回退快照; 停靠态由下方 applyDockPosition 重算, 快照恢复随即被覆盖
+            if (!this.docked && this.floatPos)
+                panel.style.top = `${this.floatPos.top}px`;
+            else if (this.savedVMaxTop !== null)
+                panel.style.top = this.savedVMaxTop;
+        }
+        // 位置随新尺寸重算: 停靠态重新贴合左下角, 浮动态夹取保证标题栏可见
+        if (this.docked)
+            this.applyDockPosition();
+        else if (!this.minimized)
+            this.clampHeaderIntoWindow();
+        this.syncVMaxButton();
+        this.updatePosSizeLabels();
+    }
+
+    toggleVerticalMax() {
+        this.setVerticalMax(!this.vmax);
     }
 
     // 停靠/退出停靠切换 (箭头按钮): 箭头方向由 syncDockButton 依状态显示
@@ -1585,7 +1741,8 @@ class MonitorPanel {
         this.docked = false;
         if (restore && this.floatPos) {
             this.panel.style.left = `${this.floatPos.left}px`;
-            this.panel.style.top = `${this.floatPos.top}px`;
+            // 垂直最大化: 垂直位置保持最大化顶边, floatPos 的垂直记忆仅保留不应用 (亦不擦除)
+            this.panel.style.top = this.vmax ? `${VMAX_MARGIN_Y}px` : `${this.floatPos.top}px`;
         }
         this.syncDockButton();
         if (!this.minimized)
@@ -1600,7 +1757,10 @@ class MonitorPanel {
         this.panel.style.right = "auto";
         this.panel.style.bottom = "auto";
         this.panel.style.left = `${sidebar + DOCK_OFFSET_X}px`;
-        this.panel.style.top = `${Math.max(EDGE, window.innerHeight - h - DOCK_OFFSET_Y)}px`;
+        // 垂直最大化: 垂直位置恒为最大化顶边 (不经底部偏移反推, 该计算仅在边距常量
+        // 恰好满足 2 * VMAX_MARGIN_Y == DOCK_OFFSET_Y + EDGE 时才与顶边语义一致)
+        this.panel.style.top = this.vmax ? `${VMAX_MARGIN_Y}px`
+            : `${Math.max(EDGE, window.innerHeight - h - DOCK_OFFSET_Y)}px`;
     }
 
     // 停靠按钮随状态同步 (箭头方向反映当前是否停靠, 而非点击动作);
@@ -1608,6 +1768,12 @@ class MonitorPanel {
     syncDockButton() {
         this.dockBtn.textContent = this.docked ? "\u2197" : "\u2199";
         this.dockBtn.title = this.t(this.docked ? "undockTip" : "dockTip");
+    }
+
+    // 垂直最大化按钮随状态同步 (还原形图标 = 当前处于最大化, 与 Windows 按钮图标约定一致)
+    syncVMaxButton() {
+        this.vmaxBtn.innerHTML = this.vmax ? ICONS.vmaxRestore : ICONS.vmax;
+        this.vmaxBtn.title = this.t(this.vmax ? "vmaxRestoreTip" : "vmaxTip");
     }
 
     // 探测 ComfyUI 左侧边栏宽度, 探测失败用兜底值 (避免遮挡)
@@ -1636,6 +1802,10 @@ class MonitorPanel {
         this.minimized = target;
         const panel = this.panel;
         if (target) {
+            // 最大化态先还原 (恢复内联高度/top 并同步按钮): savedSize 记录还原后的尺寸,
+            // 折叠即退出最大化, 还原时回到最大化前的原始尺寸 (与 Windows 语义一致)
+            if (this.vmax)
+                this.setVerticalMax(false);
             this.savedSize = { w: panel.offsetWidth, h: panel.offsetHeight };
             panel.classList.add("dynmon-min");
             this.contentEl.style.display = "none";
@@ -1712,6 +1882,7 @@ class MonitorPanel {
         // 问号按钮不设原生 title: 避免原生提示约 1s 后弹出并遮挡自定义帮助弹窗
         this.resetBtn.title = this.t("resetTip");
         this.syncDockButton();
+        this.syncVMaxButton();
         this.minBtn.title = this.minimized ? this.t("restoreTip") : this.t("minimizeTip");
         this.ramBtn.textContent = this.t("cleanRam");
         this.vramBtn.textContent = this.t("cleanVram");
@@ -2203,15 +2374,18 @@ class MonitorPanel {
                 <span class="dynmon-row-btns">
                     <button data-act="copy"></button>
                     <button data-act="open"></button>
-                    ${mode === "loaded" ? '<button data-act="unload"></button>' : ""}
+                    ${mode === "loaded"
+                        ? '<button data-act="unload"></button>'
+                        : '<button data-act="remove"></button>'}
                 </span>
             </div>
         `;
         row.querySelector('[data-act="copy"]').innerHTML = ICONS.copy;
         row.querySelector('[data-act="open"]').innerHTML = ICONS.open;
-        const unloadBtn = row.querySelector('[data-act="unload"]');
-        if (unloadBtn)
-            unloadBtn.innerHTML = ICONS.unload;
+        // 第三按钮: 已加载 = 卸载, 已卸载 = 删除记录; 外观完全对称 (同图标同红色样式, 仅功能不同)
+        const actionBtn = row.querySelector('[data-act="unload"], [data-act="remove"]');
+        if (actionBtn)
+            actionBtn.innerHTML = ICONS.unload;
         return row;
     }
 
@@ -2243,14 +2417,19 @@ class MonitorPanel {
         row.querySelector(".dynmon-time").textContent =
             fmtClock(isRemoved ? m.unloaded_at : m.loaded_at);
 
-        // 行按钮 tooltip (i18n); 卸载按钮对常驻内存的模型禁用 (卸载语义不适用)
+        // 行按钮 tooltip (i18n); 卸载按钮对常驻内存的模型禁用 (卸载语义不适用);
+        // 已卸载行的第三按钮为删除记录 (与已加载行按钮位置对称)
         const btns = row.querySelectorAll(".dynmon-row-btns button");
         btns[0].title = this.t("copyTip");
         btns[1].title = this.t("openTip");
         if (btns[2]) {
-            const ramOnly = !isRemoved && m.location === "ram";
-            btns[2].disabled = ramOnly;
-            btns[2].title = ramOnly ? this.t("unloadRamTip") : this.t("unloadTip");
+            if (isRemoved) {
+                btns[2].title = this.t("removeRecordTip");
+            } else {
+                const ramOnly = m.location === "ram";
+                btns[2].disabled = ramOnly;
+                btns[2].title = ramOnly ? this.t("unloadRamTip") : this.t("unloadTip");
+            }
         }
 
         // 行状态配色: 使用中 = 绿色调, 空闲 = 基础色, 已卸载 = 强制中性色
@@ -2384,6 +2563,15 @@ class MonitorPanel {
                         ? this.t("unloadNotFoundMsg")
                         : this.t("unloadFail", e.message);
                 this.flash(msg, true);
+            }
+        } else if (act === "remove") {
+            // 删除单条已卸载记录: 后端移除后主动刷新 (下次快照即不含该条, 签名变化触发重建)
+            try {
+                await postJSON("/unloaded/remove", { uuid });
+                this.flash(this.t("recordRemoved"));
+                scheduleRefresh();
+            } catch (e) {
+                this.flash(this.t("removeFail", e.message), true);
             }
         }
     }
