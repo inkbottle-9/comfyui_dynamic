@@ -50,19 +50,23 @@ except Exception:  # pragma: no cover - 依赖缺失或非 NVIDIA 环境
 _nvml_lock = threading.Lock()
 _nvml_handles: dict = {}  # cuda 设备索引 -> nvml handle
 _nvml_failed = False  # 初始化失败后不再重试, 避免每次快照都付出初始化代价
+_nvml_inited = False  # nvmlInit 是否已成功执行 (零设备环境句柄表恒为空, 需独立标志判重)
 
 
 def _get_nvml_handles() -> dict:
     """惰性初始化 NVML 并返回 cuda 设备句柄表, 失败时返回空表."""
-    global _nvml_failed
+    global _nvml_failed, _nvml_inited
     if pynvml is None or _nvml_failed:
         return {}
     with _nvml_lock:
-        if not _nvml_handles:
+        # 判重用独立标志而非句柄表非空: 设备数为 0 的合法环境句柄表恒为空,
+        # 若以表非空为判据, 每个快照都会重复执行 nvmlInit
+        if not _nvml_inited:
             try:
                 pynvml.nvmlInit()
                 for i in range(pynvml.nvmlDeviceGetCount()):
                     _nvml_handles[i] = pynvml.nvmlDeviceGetHandleByIndex(i)
+                _nvml_inited = True
             except Exception:
                 _nvml_failed = True
                 return {}
@@ -95,11 +99,29 @@ def _start_cpu_temp_thread() -> None:
         pass
 
 
+# Windows 温度轮询线程的惰性启动状态 (双检锁防止并发快照重复拉起)
+_cpu_temp_thread_lock = threading.Lock()
+_cpu_temp_thread_started = False
+
+
+def _ensure_cpu_temp_thread() -> None:
+    """首次快照时惰性启动 Windows 温度轮询线程 (WMI 查询耗时秒级, 不能在快照路径中执行).
+
+    不在模块导入时启动: PowerShell 常驻轮询是持续性开销, 插件加载即启动会让
+    从未使用监控功能的环境也持续付费; 延迟到 get_snapshot 首次调用时拉起.
+    """
+    global _cpu_temp_thread_started
+    if _cpu_temp_thread_started:
+        return
+    with _cpu_temp_thread_lock:
+        if _cpu_temp_thread_started:
+            return
+        _cpu_temp_thread_started = True
+        _start_cpu_temp_thread()
+
+
 # 模块加载时预热 cpu_percent: 该函数首次调用固定返回 0.0, 之后才返回真实区间占比
 psutil.cpu_percent(interval=None)
-
-# 启动 Windows 下的 CPU 温度后台轮询 (WMI 查询耗时秒级, 不能在快照路径中执行)
-_start_cpu_temp_thread()
 
 
 # ============================================================
@@ -418,8 +440,14 @@ def _cpu_temperature() -> float | None:
     if platform.system() != "Windows":
         return _cpu_temp_psutil()
 
-    # 直接返回后台线程维护的缓存值 (线程停止刷新时返回旧值, 避免跳变)
-    return _cpu_temp_cache.get("value")
+    # 返回后台线程维护的缓存值; 超过新鲜期未刷新视为来源失效, 返回 None 而非旧值
+    # (线程停止刷新/温度来源消失时, 高温旧值若冻结不清, 前端会陷入永久假告警)
+    value = _cpu_temp_cache["value"]
+    if value is None:
+        return None
+    if time.monotonic() - _cpu_temp_cache["ts"] > CPU_TEMP_STALE_SEC:
+        return None
+    return value
 
 
 # psutil 传感器命中 CPU 的关键词 (chip 名称与传感器标签小写匹配;
@@ -453,8 +481,12 @@ def _cpu_temp_psutil() -> float | None:
     return cpu_best if cpu_best is not None else any_best
 
 
-# 后台温度缓存: {"value": float | None}
-_cpu_temp_cache: dict = {"value": None}
+# 温度缓存新鲜期 (秒): 超期未刷新即视为来源失效. 正常刷新周期 2 s, 放宽到
+# 4 个周期以容忍单次查询抖动; 后台线程转入失败退避后, 旧值超期即不再返回
+CPU_TEMP_STALE_SEC = 8.0
+
+# 后台温度缓存: value = 最近一次成功查询的温度, ts = 其写入时刻 (time.monotonic)
+_cpu_temp_cache: dict = {"value": None, "ts": 0.0}
 
 # PowerShell 脚本: 依次尝试三级来源, 输出首个命中的温度值 (摄氏度, 单行数字)
 # - SensorType=2 在 LHM/OHM 中表示 Temperature, 取名称含 CPU 的传感器最大值
@@ -514,6 +546,7 @@ def _cpu_temp_cache_loop() -> None:
         value = _cpu_temp_windows_query()
         if value is not None and value > 0:
             _cpu_temp_cache["value"] = round(value, 1)
+            _cpu_temp_cache["ts"] = time.monotonic()
             fail_streak = 0
         else:
             fail_streak += 1
@@ -551,6 +584,7 @@ def _build_snapshot() -> dict:
 def get_snapshot() -> dict:
     """获取监控快照, TTL 内直接返回缓存 (多标签页共享)."""
     global _snapshot_cache, _snapshot_time
+    _ensure_cpu_temp_thread()  # Windows 温度轮询线程在首次快照时惰性启动
     now = time.monotonic()
     with _snapshot_lock:
         if _snapshot_cache is not None and (now - _snapshot_time) < SNAPSHOT_TTL:
@@ -854,6 +888,10 @@ def register_monitor_routes() -> None:
             body = await request.json()
         except Exception:
             body = {}
+        if not isinstance(body, dict):
+            # 合法 JSON 但非对象 (数组/标量): 按空 body 处理, 走下方 unknown target
+            # 的 400 口径, 而非在取值时抛 AttributeError 落成 500 (与其它端点一致)
+            body = {}
         target = body.get("target")
 
         if target == "vram":
@@ -937,7 +975,8 @@ def register_monitor_routes() -> None:
                 {"error": "no path info for this model"}, status=400
             )
         if not os.path.exists(path):
-            return web.json_response({"error": "file not on disk"}, status=400)
+            # 410 与 "无路径信息" (400) 区分: 前端据此分派准确的失败文案
+            return web.json_response({"error": "file not on disk"}, status=410)
 
         try:
             _open_in_explorer(path)
@@ -959,7 +998,9 @@ def register_monitor_routes() -> None:
             body = await request.json()
         except Exception:
             body = {}
-        uuid = (body or {}).get("uuid")
+        if not isinstance(body, dict):  # 非对象 JSON 按空 body 处理 (走 missing uuid 的 400)
+            body = {}
+        uuid = body.get("uuid")
         if not uuid:
             return web.json_response({"error": "missing uuid"}, status=400)
         with _model_track_lock:

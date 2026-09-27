@@ -96,7 +96,7 @@ class RawColors {
     static red__660066 = "#660066";
     static red__cc0000 = "#CC0000";
     static red__cc0066 = "#CC0066";
-    static red__ff0000 = "#ff0000";
+    static red__ff0000 = "#FF0000";
     static red__ff6666 = "#FF6666";
     static red__ffcccc = "#FFCCCC";
     static red__ff6600 = "#FF6600";
@@ -131,7 +131,6 @@ class RawColors {
     static blue__0066ff = "#0066FF";
     static blue__ccccff = "#CCCCFF";
     static blue__ccffff = "#CCFFFF";
-    static blue__333366cc = "#006666"; // 80% 透明蓝灰 (类名徽章底)
     static blue__66ccff66 = "#66CCFF66"; // 透明蓝 (占比条模型段)
     // 黄 / 橙
     static yellow__ffcc00 = "#FFCC00";
@@ -232,7 +231,7 @@ class BackgroundColors {
     static locationVram = RawColors.red__660000;     // .dynmon-loc-vram 徽章底
     static locationRam = RawColors.blue__0000cc;       // .dynmon-loc-ram 徽章底
     static locationPartial = RawColors.red__660066;    // .dynmon-loc-partial 徽章底
-    static classBadge = RawColors.blue__333366cc;       // .dynmon-class 类名徽章底
+    static classBadge = RawColors.green__006666;       // .dynmon-class 类名徽章底
     // 消息行 / 状态栏
     static messageBar = RawColors.grey__222222;         // .dynmon-msgbar 消息行底
     static statusBar = RawColors.grey__222222;          // .dynmon-statusbar 状态栏底
@@ -356,6 +355,7 @@ const CHART_DOMAIN_FALLBACK = [0, 100]; // CHART_DOMAIN 未覆盖的 key 的回�
 const HEARTBEAT_MS = 100;      // 心跳周期: 驱动启用/设置热更新与对话框开关轮询
 const FETCH_FAIL_STREAK_THRESHOLD = 3; // 轮询连续失败达到此次数后进入退避
 const FETCH_FAIL_BACKOFF_MS = 5000;    // 退避间隔 (ms): 后端不可达时的最低重试周期
+const FETCH_TIMEOUT_MS = 5000;         // 单次取数超时 (ms): 挂起连接不设限会令 fetchBusy 永久卡死轮询
 const HEADER_TICK_MS = 33;     // 标题栏颜色渐变 tick (约 30fps)
 const MSG_CLEAR_MS = 3500;     // 消息行自动清空延时
 const ACTION_REFRESH_MS = 350; // 用户动作 (卸载/清理) 后主动刷新延时
@@ -542,6 +542,7 @@ const LANGS = {
         freeSkippedMsg: (n) => `${n} RAM-resident model(s) skipped`,
         unloadFail: (m) => `Unload failed: ${m}`,
         openNoPath: "No path info for this model",
+        openNoFile: "Model file is not on disk",
         openReleased: "Model was released, refresh and retry",
         openFail: (m) => `Open failed: ${m}`,
         unloadReleased: "Model was already released",
@@ -694,6 +695,7 @@ const LANGS = {
         freeSkippedMsg: (n) => `${n} 个常驻内存的模型未受影响`,
         unloadFail: (m) => `卸载失败: ${m}`,
         openNoPath: "该模型没有路径信息",
+        openNoFile: "模型文件已不在磁盘上",
         openReleased: "模型已被释放, 请刷新后再试",
         openFail: (m) => `打开失败: ${m}`,
         unloadReleased: "模型已被释放",
@@ -843,7 +845,9 @@ function setSetting(key, value) {
 // ============================================================
 
 async function fetchStats() {
-    const res = await fetch(`${API_BASE}/stats`);
+    // 超时中断: fetchBusy 仅在 promise settle 后复位, 无超时的挂起连接会让
+    // 轮询静默停摆 (失败退避机制也无从介入); 超时按普通失败计入退避计数
+    const res = await fetch(`${API_BASE}/stats`, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
     if (!res.ok)
         throw new Error(`http ${res.status}`);
     const data = await res.json();
@@ -2249,7 +2253,11 @@ class MonitorPanel {
             return;
         this.dirsLoaded = true;
         fetch(`${API_BASE}/folders`)
-            .then(r => r.json())
+            .then(r => {
+                if (!r.ok)
+                    throw new Error(`http ${r.status}`); // 后端报错走 catch 提示并允许重试, 而非误显示为无目录
+                return r.json();
+            })
             .then((data) => {
                 const folders = data.folders || [];
                 let count = 0;
@@ -2522,7 +2530,10 @@ class MonitorPanel {
             return;
 
         if (act === "copy") {
-            copyText(buildDetailText(m, LANGS[this.lang]), () => this.flash(this.t("copiedFull")));
+            // 已卸载条目按卸载语义渲染 (状态字段置空), 与该行 tooltip 口径一致
+            const isRemoved = m === this.unloadedByUuid.get(uuid);
+            copyText(buildDetailText(m, LANGS[this.lang], isRemoved),
+                () => this.flash(this.t("copiedFull")));
         } else if (act === "open") {
             try {
                 const r = await postJSON("/open", { uuid });
@@ -2530,9 +2541,11 @@ class MonitorPanel {
             } catch (e) {
                 const msg = e.status === 400
                     ? this.t("openNoPath")
-                    : e.status === 404
-                        ? this.t("openReleased")
-                        : this.t("openFail", e.message);
+                    : e.status === 410
+                        ? this.t("openNoFile")
+                        : e.status === 404
+                            ? this.t("openReleased")
+                            : this.t("openFail", e.message);
                 this.flash(msg, true);
             }
         } else if (act === "unload") {
@@ -2800,11 +2813,20 @@ const DIALOG_SELS = '[role="dialog"], .comfy-modal, .comfy-settings, .p-dialog';
 const DIALOG_MIN_W = 200; // role=dialog 误触发防护: 最小宽度 (px)
 const DIALOG_MIN_H = 100; // role=dialog 误触发防护: 最小高度 (px)
 
+// 弹窗可见性: 元素须实际参与渲染 (自身或任一祖先 display: none 时判定为隐藏).
+// 不可用 "offsetParent !== null || display !== none" 的 OR 组合: 祖先级隐藏下
+// offsetParent 为 null 但 computed display 仍是设定值, OR 条件整体为真,
+// 隐藏弹窗被误判为打开会导致面板被错误最小化; checkVisibility 额外排除
+// visibility: hidden, 旧环境回退 getClientRects (仅感知 display 链)
+const isDialogVisible = (el) => typeof el.checkVisibility === "function"
+    ? el.checkVisibility()
+    : el.getClientRects().length > 0;
+
 function processDialogState() {
     if (!panel)
         return;
     const open = Array.from(document.querySelectorAll(DIALOG_SELS))
-        .some(el => (el.offsetParent !== null || getComputedStyle(el).display !== "none")
+        .some(el => isDialogVisible(el)
             && (el.getAttribute("role") !== "dialog"
                 || (el.offsetWidth > DIALOG_MIN_W && el.offsetHeight > DIALOG_MIN_H)));
     if (open && !panel.minimized) {
