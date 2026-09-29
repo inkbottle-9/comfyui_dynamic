@@ -1,11 +1,11 @@
 [project]
 name = "comfyui_dynamic"
 description = """
-Adds Python script execution and quality-of-life nodes to ComfyUI. \
-Featuring a powerful new control panel. You really can't miss it.\
+Python script executor, powerful control panel (resource monitor, models management), \
+pipe any, switch any (branch/if), file reading, diagram display (Graphviz, Mermaid, PlantUML) and other useful tools.\
 """
 # 9527
-version = "1.2.0"
+version = "1.3.0"
 license = { file = "LICENSE.md" }
 dependencies = ["psutil", "pynvml"]
 classifiers = ["Operating System :: OS Independent"]
