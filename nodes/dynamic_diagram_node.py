@@ -13,6 +13,9 @@
 # - 渲染失败 (代码语法错误 / 工具未配置或缺失 / 执行超时) 会抛出异常终止执行,
 #   错误信息包含工具的 stderr 摘要; PlantUML 的严格报错依赖 -failfast2 参数,
 #   需要较新版本的 PlantUML, 过旧版本遇到无效代码可能以无关的参数错误失败
+# - 源码通过 code 字符串输入端口接入 (force_input, 不生成节点内编辑框), 便于复用上游
+#   文本节点的输出; 节点末尾的 extra args 单行输入框用于向目标程序追加自定义命令行参数
+#   (仅做 shell 风格拆分后逐字透传, 不做校验)
 # - 工具路径解析 (含智能退化) 与外部进程调用全部在 core/diagram.py 中, 本文件只负责
 #   schema 声明与结果组装
 from pathlib import Path
@@ -33,10 +36,6 @@ from ..core.diagram import render_diagram
 from ..core.utils import LogUtils
 from ..core.utils import check_is_equivalent_empty
 from ..core.utils import get_category
-
-
-# 源码输入框的占位示例
-PLACEHOLDER__CODE = "@startuml\nAlice -> Bob: Hello\n@enduml"
 
 
 def _load_png_as_tensor(path__png: Path) -> torch.Tensor:
@@ -86,9 +85,7 @@ class DynamicDiagramNode(io.ComfyNode):
             inputs=[
                 io.String.Input(
                     "code",
-                    multiline=True,
-                    default="",
-                    placeholder=PLACEHOLDER__CODE,
+                    force_input=True,  # 普通字符串输入端口: 无节点内编辑框, 源码由上游文本节点提供
                     tooltip=(
                         "Diagram source code. "
                         "With engine 'auto' the engine is detected from the code "
@@ -130,6 +127,25 @@ class DynamicDiagramNode(io.ComfyNode):
                         "then to 'dot' on PATH."
                     ),
                 ),
+                io.String.Input(
+                    "extra_args",
+                    display_name="extra args",
+                    default="",
+                    tooltip=(
+                        "Custom command-line arguments appended to the target rendering tool's "
+                        "command line, after the built-in arguments (repeated flags typically take "
+                        "the later value, e.g. graphviz's -K / -G / -N / -E). "
+                        "Exceptions: do not pass -T to graphviz (a repeated -T adds output formats "
+                        "instead of overriding; change the format via the format port), and do not "
+                        "override mermaid's -i / -o (products would no longer be written to "
+                        "ComfyUI's temp directory). "
+                        "Arguments are split with shell-like quoting rules; quote values that "
+                        "contain spaces. "
+                        "Leave empty to pass nothing. "
+                        "In plantuml.jar mode the arguments are consumed by PlantUML itself, "
+                        "not by the java launcher."
+                    ),
+                ),
             ],
             outputs=[
                 io.Image.Output(
@@ -160,7 +176,9 @@ class DynamicDiagramNode(io.ComfyNode):
         return describe_resolved_tools(layout if layout else "dot", flag__verbose=False)
 
     @classmethod
-    def execute(cls, code: str, engine: str, format: str, layout: str, **kwargs) -> io.NodeOutput:
+    def execute(
+        cls, code: str, engine: str, format: str, layout: str, extra_args: str, **kwargs
+    ) -> io.NodeOutput:
         # 空代码提前报错: 否则 auto 模式会先误报 "引擎无法识别" 再报空代码错误, 日志产生误导
         if check_is_equivalent_empty(code):
             raise ValueError("Diagram code is empty.")
@@ -168,8 +186,10 @@ class DynamicDiagramNode(io.ComfyNode):
         engine_resolved = detect_engine(code) if engine == "auto" else engine
 
         # 渲染产物: png 列表始终非空; svg 列表仅在 svg 模式且渲染成功时非空
-        result = render_diagram(code, engine_resolved, format, layout)
-        list__tensor = [_load_png_as_tensor(path__png) for path__png in result.list__path__png]
+        result = render_diagram(code, engine_resolved, format, layout, extra_args)
+        list__tensor = [
+            _load_png_as_tensor(path__png) for path__png in result.list__path__png
+        ]
 
         # text 与 image 逐图对齐: svg 模式逐图输出源码 (降级的条目为空串), png 模式全为空串
         if result.list__text__svg:

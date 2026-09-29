@@ -525,7 +525,12 @@ def _cpu_temp_windows_query() -> float | None:
                 _POWERSHELL_TEMP_SCRIPT,
             ],
             capture_output=True,
-            text=True,
+            # 显式按 UTF-8 解码并容忍坏字节: PowerShell 5.1 在中文系统默认按 GBK
+            # 代码页输出本地化错误文本, 而宿主启用 UTF-8 模式时缺省解码会抛
+            # UnicodeDecodeError 令读取线程崩溃. 输出本就只取数字, 坏字节可安全
+            # 替换 (指定 encoding/errors 即隐含文本模式, 无需 text=True)
+            encoding="utf-8",
+            errors="replace",
             timeout=8,
             creationflags=creationflags,
         )

@@ -164,6 +164,34 @@
     - 需要快速一览所有合法的采样器或调度器选项
 
 
+- `DynamicDiagramNode`
+  - 动态图表节点, 将 PlantUML / Mermaid / Graphviz 源码渲染为图像并显示在节点上
+  - 源码通过 `code` 字符串输入端口接入 (推荐搭配多行字符串节点或文本文件读取节点)
+    - `engine` 端口选择渲染引擎 (auto 为启发式识别)
+    - `format` 端口选择输出格式 (png / svg)
+  - Graphviz 的布局引擎 (dot, neato 等) 通过 `layout` 端口选择, 其它引擎忽略该端口
+  - 输出:
+    - `image` (始终为 png 渲染结果)
+    - `text` (svg 模式下逐图输出 SVG 源码, png 模式为空串)
+    - 两者均为输出列表, PlantUML 源码包含多个 @start* 块时会渲染出多张图
+    - 注: PlantUML 不要使用具名的 @start 块 (如 "@startuml myname"),
+      其产物会写入自定义文件名而丢失, 请使用不带名称的 "@start*"
+  - 渲染失败 (代码语法错误 / 工具未配置或缺失 / 执行超时) 会抛出异常终止执行
+    - 错误信息包含工具的 stderr 摘要
+  - `extra args` 输入框用于向目标程序追加自定义命令行参数
+    - shell 风格拆分, 含空格的值用双引号包裹
+    - 参数追加在内置参数之后, 重复的同名 flag 通常为后值生效, 可覆盖内置行为
+      (如 graphviz 的 -K / -G / -N / -E)
+    - 注:
+      - graphviz 对重复的 -T 是叠加多格式输出而非覆盖,
+        修改输出格式请使用 `format` 端口而不要传 -T
+      - 同理避免覆盖 mermaid 的 -i / -o
+        (产物将不再写入 ComfyUI 临时目录, 节点读取产物时报错)
+      - plantuml.jar 模式下参数由 PlantUML 本身消费, 而非 java 启动器
+  - 外部渲染工具路径的配置与说明见 "4. 依赖" 章节
+
+  ![DynamicDiagramNode](./DynamicDiagramNode.png)
+
 ## 3. 安装
 
 - 将本仓库克隆到 ComfyUI 的 `custom_nodes` 目录:
@@ -191,32 +219,6 @@
   - `pynvml`: GPU 利用率与温度 (可选, 缺失或非 NVIDIA 环境时自动降级,
     仅监控功能不可用, 不影响插件其余功能)
 - 动态图表节点 (DynamicDiagramNode) 需要以下外部渲染工具:
-  - **`PlantUML`**
-    - 官网: <https://plantuml.com/> (下载页: <https://plantuml.com/download>)
-    - 安装 (任选其一):
-      - 官网下载 `plantuml.jar` (需要 Java 运行时, 例如 <https://adoptium.net/>)
-      - 官网下载 Windows 可执行版 (`plantuml.exe`)
-      - 包管理器:
-
-        ```shell
-        winget install --id PlantUML.PlantUML  # windows
-        scoop install plantuml
-        choco install plantuml
-        apt install plantuml                   # Debian/Ubuntu
-        ```
-
-    - 设置: `PlantUML path`
-      - 直接指向 `plantuml.jar` / `plantuml` 可执行文件, 或使用文件所在目录
-      - 使用 jar 且 `java` 不在 PATH 时, 需另设 `Java path` 指向 java 可执行文件或其所在目录
-  - **`Mermaid (mermaid-cli)`**
-    - 官网: <https://mermaid.js.org/> (CLI 仓库: <https://github.com/mermaid-js/mermaid-cli>)
-    - 安装: 先安装 Node.js (<https://nodejs.org/>), 然后执行
-
-      ```shell
-      npm install -g @mermaid-js/mermaid-cli
-      ```
-
-    - 设置: `Mermaid path` 指向 `mmdc` 可执行文件 (Windows 下通常是 `mmdc.cmd`) 或其所在目录
   - **`Graphviz`**
     - 官网: <https://graphviz.org/> (下载页: <https://graphviz.org/download/>)
     - 安装:
@@ -234,6 +236,32 @@
     - 设置:
       - `Graphviz path` 指向可执行文件 (如 `dot.exe`) 或 Graphviz 安装目录 (会自动检查 `bin` 子目录)
       - 布局引擎 (dot / neato / fdp 等) 在节点的 `layout` 端口选择
+  - **`Mermaid (mermaid-cli)`**
+    - 官网: <https://mermaid.js.org/> (CLI 仓库: <https://github.com/mermaid-js/mermaid-cli>)
+    - 安装: 先安装 Node.js (<https://nodejs.org/>), 然后执行
+
+      ```shell
+      npm install -g @mermaid-js/mermaid-cli
+      ```
+
+    - 设置: `Mermaid path` 指向 `mmdc` 可执行文件 (Windows 下通常是 `mmdc.cmd`) 或其所在目录
+  - **`PlantUML`**
+    - 官网: <https://plantuml.com/> (下载页: <https://plantuml.com/download>)
+    - 安装 (任选其一):
+      - 官网下载 `plantuml.jar` (需要 Java 运行时, 例如 <https://adoptium.net/>)
+      - 官网下载 Windows 可执行版 (`plantuml.exe`)
+      - 包管理器:
+
+        ```shell
+        winget install --id PlantUML.PlantUML  # windows
+        scoop install plantuml
+        choco install plantuml
+        apt install plantuml                   # Debian/Ubuntu
+        ```
+
+    - 设置: `PlantUML path`
+      - 直接指向 `plantuml.jar` / `plantuml` 可执行文件, 或使用文件所在目录
+      - 使用 jar 且 `java` 不在 PATH 时, 需另设 `Java path` 指向 java 可执行文件或其所在目录
   - 注:
     - 三者均为可选, 不安装不影响插件其余功能, 仅对应引擎的图表无法渲染
     - 工具路径在 ComfyUI 设置界面的 "Comfy Dynamic / Diagram" 分类下配置

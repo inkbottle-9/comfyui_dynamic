@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -33,7 +34,7 @@ SETTING_KEY__GRAPHVIZ = "ComfyDynamic.Diagram.path__graphviz"
 # ==================== 选项常量 (与节点 schema 保持一致) ====================
 
 # 支持的引擎列表 (顺序即 auto 模式的展示顺序参考)
-ENGINES = ["plantuml", "mermaid", "graphviz"]
+ENGINES = ["graphviz", "mermaid", "plantuml"]
 
 # 引擎下拉框选项 (auto 为启发式识别)
 ENGINE_OPTIONS = ["auto"] + ENGINES
@@ -44,7 +45,16 @@ FORMATS = ["png", "svg"]
 # Graphviz 布局引擎列表 (Graphviz 官方固定提供的引擎, 与可执行文件同名).
 # 注意: 这是引擎层面的静态事实, 不依赖文件系统扫描, 因此下拉框选项可以静态声明;
 # "懒" 的正确落点是把目录扫描与可执行文件解析全部推迟到执行期 (见 resolve_graphviz)
-GRAPHVIZ_LAYOUT_ENGINES = ["dot", "neato", "fdp", "sfdp", "circo", "twopi", "patchwork", "osage"]
+GRAPHVIZ_LAYOUT_ENGINES = [
+    "dot",
+    "neato",
+    "fdp",
+    "sfdp",
+    "circo",
+    "twopi",
+    "patchwork",
+    "osage",
+]
 
 # ==================== 文件名与目录惯例 ====================
 
@@ -103,7 +113,9 @@ RE_DETECT__MERMAID = re.compile(
 )
 
 # graphviz: digraph / graph 语句 (strict 可选前缀)
-RE_DETECT__GRAPHVIZ = re.compile(r"^\s*(?:strict\s+)?(?:digraph|graph)\b", re.IGNORECASE | re.MULTILINE)
+RE_DETECT__GRAPHVIZ = re.compile(
+    r"^\s*(?:strict\s+)?(?:digraph|graph)\b", re.IGNORECASE | re.MULTILINE
+)
 
 
 class DiagramToolError(RuntimeError):
@@ -197,6 +209,51 @@ def _which(string__name: str) -> Optional[Path]:
     return Path(found) if found else None
 
 
+def _split_command_args(string__args: str) -> list[str]:
+    """把自定义命令行参数字符串拆分为参数列表 (供 _render_* 追加到命令行末尾).
+
+    拆分规则:
+    - Windows: 显式状态机拆分. 仅双引号作为分组定界符 (与 cmd 的约定一致, 单引号是普通字符),
+        引号字符本身不进入参数值; 反斜杠恒为字面量, 保留 Windows 路径的原始形态.
+        不使用 shlex 的 posix=False 模式: 该模式只在引号包裹整个 token 时才分组,
+        形如 key="value with spaces" 的参数会从空格处被拆断并残留引号字符
+    - 其它平台: shlex posix=True 模式, 走标准 shell 规则 (单双引号与反斜杠转义均由 shlex 处理)
+    - 空串 / 纯空白返回空列表; 引号不配对抛 ValueError, 由执行链直接向用户报错
+    """
+    string__args = string__args.strip()
+    if not string__args:
+        return []
+    if os.name != "nt":
+        try:
+            return shlex.split(string__args, posix=True)
+        except ValueError as exception:
+            raise ValueError(
+                f"Invalid extra args ({exception}): {string__args}"
+            ) from exception
+    # Windows 分支: 引号外的空白分隔参数, 引号内的空白原样保留
+    list__args = []
+    list__chars = []
+    flag__has_token = False
+    flag__in_quotes = False
+    for char in string__args:
+        if char == '"':
+            flag__in_quotes = not flag__in_quotes
+            flag__has_token = True
+        elif char in " \t" and not flag__in_quotes:
+            if flag__has_token:
+                list__args.append("".join(list__chars))
+                list__chars = []
+                flag__has_token = False
+        else:
+            list__chars.append(char)
+            flag__has_token = True
+    if flag__in_quotes:
+        raise ValueError(f"Invalid extra args (no closing quotation): {string__args}")
+    if flag__has_token:
+        list__args.append("".join(list__chars))
+    return list__args
+
+
 # ==================== 工具路径解析 (含智能退化) ====================
 
 
@@ -208,10 +265,17 @@ def resolve_java(flag__verbose: bool = True) -> Optional[Path]:
         if path.is_file():
             return path
         # 指定的是目录: 依次查找 <dir>/java(.exe) 与 <dir>/bin/java(.exe)
-        found = _find_in_dir(path, _expand_candidates(STEMS__JAVA, NATIVE_EXE_SUFFIXES), DIR_CANDIDATES__TOOL_ROOT)
+        found = _find_in_dir(
+            path,
+            _expand_candidates(STEMS__JAVA, NATIVE_EXE_SUFFIXES),
+            DIR_CANDIDATES__TOOL_ROOT,
+        )
         if found is not None:
             return found
-        _print_warn(f"'{SETTING_KEY__JAVA}' is a directory without a java executable, fallback to PATH", flag__verbose)
+        _print_warn(
+            f"'{SETTING_KEY__JAVA}' is a directory without a java executable, fallback to PATH",
+            flag__verbose,
+        )
     found = _which("java")
     if found is None and path is not None:
         _print_warn("java not found on PATH either", flag__verbose)
@@ -234,16 +298,25 @@ def resolve_plantuml(flag__verbose: bool = True) -> PlantUmlTool:
         if path.suffix.lower() == ".jar":
             path__java = resolve_java(flag__verbose)
             if path__java is not None:
-                return PlantUmlTool(path__jar=path, path__java=path__java, path__exe=None)
+                return PlantUmlTool(
+                    path__jar=path, path__java=path__java, path__exe=None
+                )
             # jar 在但 java 不可用: 先找 jar 同目录的 exe (官方 Windows 发行包常见组合), 再退化 PATH
-            _print_warn("plantuml.jar found but java is unavailable, trying a plantuml executable next to the jar", flag__verbose)
+            _print_warn(
+                "plantuml.jar found but java is unavailable, trying a plantuml executable next to the jar",
+                flag__verbose,
+            )
             path__exe = _find_in_dir(
-                path.parent, _expand_candidates(STEMS__PLANTUML_EXE, EXE_SUFFIXES), DIR_CANDIDATES__SAME_DIR
+                path.parent,
+                _expand_candidates(STEMS__PLANTUML_EXE, EXE_SUFFIXES),
+                DIR_CANDIDATES__SAME_DIR,
             )
             if path__exe is None:
                 path__exe = _which("plantuml")
                 if path__exe is not None:
-                    _print_warn(f"falling back to plantuml on PATH: {path__exe}", flag__verbose)
+                    _print_warn(
+                        f"falling back to plantuml on PATH: {path__exe}", flag__verbose
+                    )
             if path__exe is None:
                 raise DiagramToolError(
                     f"plantuml.jar was configured ('{path}') but no java and no plantuml executable are available. "
@@ -260,13 +333,19 @@ def resolve_plantuml(flag__verbose: bool = True) -> PlantUmlTool:
         if path__jar is not None:
             path__java = resolve_java(flag__verbose)
             if path__java is not None:
-                return PlantUmlTool(path__jar=path__jar, path__java=path__java, path__exe=None)
+                return PlantUmlTool(
+                    path__jar=path__jar, path__java=path__java, path__exe=None
+                )
             _print_warn(
                 "plantuml.jar found in the directory but java is unavailable, "
                 "trying a plantuml executable in the same directory",
                 flag__verbose,
             )
-        path__exe = _find_in_dir(path, _expand_candidates(STEMS__PLANTUML_EXE, EXE_SUFFIXES), DIR_CANDIDATES__SAME_DIR)
+        path__exe = _find_in_dir(
+            path,
+            _expand_candidates(STEMS__PLANTUML_EXE, EXE_SUFFIXES),
+            DIR_CANDIDATES__SAME_DIR,
+        )
         if path__exe is not None:
             return PlantUmlTool(path__jar=None, path__java=None, path__exe=path__exe)
         _print_warn(
@@ -293,10 +372,17 @@ def resolve_mermaid(flag__verbose: bool = True) -> Path:
         if path.is_file():
             return path
         # 指定的是目录: 按 npm 惯例文件名查找 (Windows 通常是 mmdc.cmd)
-        found = _find_in_dir(path, _expand_candidates(STEMS__MERMAID, EXE_SUFFIXES), DIR_CANDIDATES__SAME_DIR)
+        found = _find_in_dir(
+            path,
+            _expand_candidates(STEMS__MERMAID, EXE_SUFFIXES),
+            DIR_CANDIDATES__SAME_DIR,
+        )
         if found is not None:
             return found
-        _print_warn(f"no mmdc executable found in '{SETTING_KEY__MERMAID}' directory, fallback to PATH", flag__verbose)
+        _print_warn(
+            f"no mmdc executable found in '{SETTING_KEY__MERMAID}' directory, fallback to PATH",
+            flag__verbose,
+        )
     found = _which("mmdc")
     if found is None:
         raise DiagramToolError(
@@ -324,7 +410,9 @@ def resolve_graphviz(string__layout: str, flag__verbose: bool = True) -> Path:
         if path.stem.lower() == string__layout.lower():
             return path
         # 同目录查找目标布局引擎
-        path__sibling = _find_in_dir(path.parent, list__layout_candidates, DIR_CANDIDATES__SAME_DIR)
+        path__sibling = _find_in_dir(
+            path.parent, list__layout_candidates, DIR_CANDIDATES__SAME_DIR
+        )
         if path__sibling is not None:
             return path__sibling
         # 找不到: 使用指定文件 + -K<layout> (所有 graphviz 可执行文件都接受 -K 参数)
@@ -339,10 +427,16 @@ def resolve_graphviz(string__layout: str, flag__verbose: bool = True) -> Path:
     path__base = None
     if path is not None and path.is_dir():
         # 布局引擎同名文件优先
-        path__base = _find_in_dir(path, list__layout_candidates, DIR_CANDIDATES__TOOL_ROOT)
+        path__base = _find_in_dir(
+            path, list__layout_candidates, DIR_CANDIDATES__TOOL_ROOT
+        )
         if path__base is None:
             # 退化到目录内的 dot
-            path__base = _find_in_dir(path, _expand_candidates(STEMS__GRAPHVIZ_DOT, NATIVE_EXE_SUFFIXES), DIR_CANDIDATES__TOOL_ROOT)
+            path__base = _find_in_dir(
+                path,
+                _expand_candidates(STEMS__GRAPHVIZ_DOT, NATIVE_EXE_SUFFIXES),
+                DIR_CANDIDATES__TOOL_ROOT,
+            )
         if path__base is None:
             _print_warn(
                 f"no graphviz executables found in '{SETTING_KEY__GRAPHVIZ}' directory, fallback to PATH",
@@ -429,10 +523,16 @@ def _run_subprocess(list__command: list[str], string__engine: str) -> None:
             "(Mermaid's first run may need to warm up Chromium, just wait and retry.)"
         ) from exception
     except OSError as exception:
-        raise DiagramToolError(f"failed to launch {string__engine}: {exception}") from exception
+        raise DiagramToolError(
+            f"failed to launch {string__engine}: {exception}"
+        ) from exception
 
     # stderr 可能是任意编码 (Windows 控制台常为 GBK), 解码失败时用替换字符兜底
-    stderr_text = completed.stderr.decode("utf-8", errors="replace").strip() if completed.stderr else ""
+    stderr_text = (
+        completed.stderr.decode("utf-8", errors="replace").strip()
+        if completed.stderr
+        else ""
+    )
     if completed.returncode != 0:
         snippet = stderr_text[:STDERR_SNIPPET_MAX_CHARS]
         raise DiagramToolError(
@@ -440,10 +540,15 @@ def _run_subprocess(list__command: list[str], string__engine: str) -> None:
         )
     # 成功时的 stderr 通常是诊断信息, 仅记录到控制台
     if stderr_text:
-        LogUtils.print_log(f"{string__engine} stderr: {stderr_text[:STDERR_SNIPPET_MAX_CHARS]}", _name__node="Diagram")
+        LogUtils.print_log(
+            f"{string__engine} stderr: {stderr_text[:STDERR_SNIPPET_MAX_CHARS]}",
+            _name__node="Diagram",
+        )
 
 
-def _render_plantuml(path__source: Path, path__output: Path) -> list[Path]:
+def _render_plantuml(
+    path__source: Path, path__output: Path, list__extra_args: list[str]
+) -> list[Path]:
     """调用 PlantUML 渲染到 path__output (格式由输出文件扩展名决定), 返回全部产物路径.
 
     源文件包含多个 @start* 块时会渲染出多个文件: <stem>.png, <stem>_001.png, ...
@@ -455,50 +560,70 @@ def _render_plantuml(path__source: Path, path__output: Path) -> list[Path]:
     if tool.path__jar is not None:
         list__command = [
             str(tool.path__java),
-            "-jar", str(tool.path__jar),
-            "-charset", "UTF-8",  # 源文件编码
+            "-jar",
+            str(tool.path__jar),
+            "-charset",
+            "UTF-8",  # 源文件编码
             "-failfast2",  # 语法错误时以非零退出码失败 (默认会渲染错误图像且退出码为 0)
             format_flag,
-            "-o", str(path__source.parent),  # 输出目录
+            "-o",
+            str(path__source.parent),  # 输出目录
             str(path__source),
         ]
     else:
         list__command = [
             str(tool.path__exe),
-            "-charset", "UTF-8",
+            "-charset",
+            "UTF-8",
             "-failfast2",
             format_flag,
-            "-o", str(path__source.parent),
+            "-o",
+            str(path__source.parent),
             str(path__source),
         ]
+    # 自定义参数追加在内置参数之后: 靠后的同名 flag 通常优先生效, 用户可覆盖内置行为
+    list__command += list__extra_args
     _run_subprocess(list__command, "plantuml")
     # 工作目录是独立的 mkdtemp 目录, glob 不会误拾其它文件;
     # 排序规则: '.' 的字典序在 '_' 之前, 恰好使首图 <stem>.png 排在最前
-    list__produced = sorted(path__source.parent.glob(f"{path__source.stem}*{path__output.suffix}"))
+    list__produced = sorted(
+        path__source.parent.glob(f"{path__source.stem}*{path__output.suffix}")
+    )
     if not list__produced:
         raise DiagramToolError("plantuml did not produce the expected output file.")
     list__moved = []
     for path__produced in list__produced:
         # 命名规则: <输出主干><序号部分><扩展名>, 序号部分 = 产物主干去掉源主干后的余部
-        part = path__produced.stem[len(path__source.stem):]
-        path__moved = path__output.with_name(f"{path__output.stem}{part}{path__output.suffix}")
+        part = path__produced.stem[len(path__source.stem) :]
+        path__moved = path__output.with_name(
+            f"{path__output.stem}{part}{path__output.suffix}"
+        )
         shutil.move(str(path__produced), str(path__moved))
         list__moved.append(path__moved)
     return list__moved
 
 
-def _render_mermaid(path__source: Path, path__output: Path) -> list[Path]:
+def _render_mermaid(
+    path__source: Path, path__output: Path, list__extra_args: list[str]
+) -> list[Path]:
     """调用 mermaid-cli (mmdc) 渲染到 path__output (格式由输出文件扩展名决定), 返回产物路径"""
     path__exe = resolve_mermaid()
     list__command = [str(path__exe), "-i", str(path__source), "-o", str(path__output)]
     if path__output.suffix.lower() == ".png":
         # png 输出统一白底 (默认背景透明); scale 放大像素密度让预览更清晰
         list__command += ["-b", "white", "-s", str(MERMAID_PNG_SCALE)]
+    # 自定义参数追加在内置参数之后: 靠后的同名 flag 通常优先生效, 用户可覆盖内置行为
+    list__command += list__extra_args
     _run_subprocess(list__command, "mermaid")
     return [path__output]
 
 
-def _render_graphviz(path__source: Path, path__output: Path, string__layout: str) -> list[Path]:
+def _render_graphviz(
+    path__source: Path,
+    path__output: Path,
+    string__layout: str,
+    list__extra_args: list[str],
+) -> list[Path]:
     """调用 graphviz 渲染到 path__output (格式由输出文件扩展名决定), 返回产物路径.
 
     始终显式传 -K<layout>: 即使实际调用的是 dot.exe (退化场景) 也能按请求的引擎布局
@@ -509,20 +634,31 @@ def _render_graphviz(path__source: Path, path__output: Path, string__layout: str
         "-K" + string__layout,
         "-T" + path__output.suffix.lstrip("."),
         str(path__source),
-        "-o", str(path__output),
+        "-o",
+        str(path__output),
     ]
+    # 自定义参数追加在内置参数之后: 靠后的同名 flag 通常优先生效, 用户可覆盖内置行为
+    list__command += list__extra_args
     _run_subprocess(list__command, "graphviz")
     return [path__output]
 
 
-def _render_to_file(string__engine: str, path__source: Path, path__output: Path, string__layout: str) -> list[Path]:
+def _render_to_file(
+    string__engine: str,
+    path__source: Path,
+    path__output: Path,
+    string__layout: str,
+    list__extra_args: list[str],
+) -> list[Path]:
     """按引擎分发渲染调用, 返回全部产物文件路径"""
     if string__engine == "plantuml":
-        return _render_plantuml(path__source, path__output)
+        return _render_plantuml(path__source, path__output, list__extra_args)
     elif string__engine == "mermaid":
-        return _render_mermaid(path__source, path__output)
+        return _render_mermaid(path__source, path__output, list__extra_args)
     elif string__engine == "graphviz":
-        return _render_graphviz(path__source, path__output, string__layout)
+        return _render_graphviz(
+            path__source, path__output, string__layout, list__extra_args
+        )
     else:
         raise ValueError(f"Unsupported engine: {string__engine}")
 
@@ -532,6 +668,7 @@ def render_diagram(
     string__engine: str,
     string__format: str,
     string__layout: str,
+    string__extra_args: str = "",
     flag__verbose: bool = True,
 ) -> DiagramRenderResult:
     """渲染图表源码, 产物写入 ComfyUI temp 目录.
@@ -539,6 +676,8 @@ def render_diagram(
     png 模式: 只渲染 png;
     svg 模式: 渲染 png (供 IMAGE 输出) 与 svg (供预览与源码输出),
     svg 渲染失败不视为整体失败, 返回空源码并打印警告.
+    string__extra_args: 用户自定义命令行参数, shell 风格拆分后追加到目标程序
+    命令行末尾 (png 与 svg 两次渲染均生效); 拆分失败抛 ValueError
     """
     if check_is_equivalent_empty(string__code):
         raise ValueError("Diagram code is empty.")
@@ -546,12 +685,16 @@ def render_diagram(
         raise ValueError(f"Unsupported engine: {string__engine}")
     if string__format not in FORMATS:
         raise ValueError(f"Unsupported format: {string__format}")
+    # 拆分提前到所有文件 IO 之前: 参数字符串非法时直接报错, 不留下半途产物
+    list__extra_args = _split_command_args(string__extra_args)
 
     dir__temp = Path(folder_paths.get_temp_directory())
     dir__temp.mkdir(parents=True, exist_ok=True)
     # png 与 svg 各使用一个独立的随机主干名; 同一源的多个图表块共享主干并以序号区分
     stem__png = f"dynamic_diagram_{uuid.uuid4().hex}"
-    stem__svg = f"dynamic_diagram_{uuid.uuid4().hex}" if string__format == "svg" else None
+    stem__svg = (
+        f"dynamic_diagram_{uuid.uuid4().hex}" if string__format == "svg" else None
+    )
 
     # 源码写入系统临时目录的独立工作文件夹, 结束后整体清理
     dir__work = Path(tempfile.mkdtemp(prefix="comfy_dynamic_diagram_"))
@@ -560,7 +703,11 @@ def render_diagram(
         path__source.write_text(string__code, encoding="utf-8")
 
         list__path__png = _render_to_file(
-            string__engine, path__source, dir__temp / f"{stem__png}.png", string__layout
+            string__engine,
+            path__source,
+            dir__temp / f"{stem__png}.png",
+            string__layout,
+            list__extra_args,
         )
         list__name__png = [path__png.name for path__png in list__path__png]
 
@@ -570,16 +717,24 @@ def render_diagram(
         if stem__svg is not None:
             try:
                 list__path__svg = _render_to_file(
-                    string__engine, path__source, dir__temp / f"{stem__svg}.svg", string__layout
+                    string__engine,
+                    path__source,
+                    dir__temp / f"{stem__svg}.svg",
+                    string__layout,
+                    list__extra_args,
                 )
                 list__name__svg = [path__svg.name for path__svg in list__path__svg]
                 list__text__svg = [
-                    path__svg.read_text(encoding="utf-8") for path__svg in list__path__svg
+                    path__svg.read_text(encoding="utf-8")
+                    for path__svg in list__path__svg
                 ]
             except Exception as exception:
                 # png 已成功, svg 侧任何失败 (工具错误 / IO 错误 / 解码错误) 都不阻塞整体执行:
                 # 降级为空源码, 由节点层以空字符串按图像数量对齐补齐
-                _print_warn(f"svg render failed (the image output is unaffected): {exception}", flag__verbose)
+                _print_warn(
+                    f"svg render failed (the image output is unaffected): {exception}",
+                    flag__verbose,
+                )
                 list__path__svg = []
                 list__name__svg = []
                 list__text__svg = []
@@ -618,7 +773,9 @@ def describe_resolved_tools(string__layout: str, flag__verbose: bool = False) ->
     list__parts = []
     try:
         tool = resolve_plantuml(flag__verbose)
-        list__parts.append(f"plantuml={_file_signature(tool.path__jar or tool.path__exe)}")
+        list__parts.append(
+            f"plantuml={_file_signature(tool.path__jar or tool.path__exe)}"
+        )
         list__parts.append(f"java={_file_signature(tool.path__java)}")
     except DiagramToolError:
         list__parts.append("plantuml=unresolved")
@@ -627,7 +784,9 @@ def describe_resolved_tools(string__layout: str, flag__verbose: bool = False) ->
     except DiagramToolError:
         list__parts.append("mermaid=unresolved")
     try:
-        list__parts.append(f"graphviz={_file_signature(resolve_graphviz(string__layout, flag__verbose))}")
+        list__parts.append(
+            f"graphviz={_file_signature(resolve_graphviz(string__layout, flag__verbose))}"
+        )
     except DiagramToolError:
         list__parts.append("graphviz=unresolved")
     return ";".join(list__parts)

@@ -2384,8 +2384,8 @@ class MonitorPanel {
                     <button data-act="copy"></button>
                     <button data-act="open"></button>
                     ${mode === "loaded"
-                        ? '<button data-act="unload"></button>'
-                        : '<button data-act="remove"></button>'}
+                ? '<button data-act="unload"></button>'
+                : '<button data-act="remove"></button>'}
                 </span>
             </div>
         `;

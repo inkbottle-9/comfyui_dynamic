@@ -171,6 +171,35 @@
     - Need to quickly view all valid sampler or scheduler options
 
 
+- `DynamicDiagramNode`
+  - Dynamic diagram node, renders PlantUML / Mermaid / Graphviz source code into images and shows them on the node
+  - Source code comes in through the `code` string input port (pair it with a multiline string node
+    or a text file reading node)
+    - The `engine` port selects the rendering engine (auto = heuristic detection)
+    - The `format` port selects the output format (png / svg)
+  - The Graphviz layout engine (dot, neato etc.) is selected via the `layout` port, ignored by other engines
+  - Outputs:
+    - `image` (always png renders)
+    - `text` (SVG source per diagram in svg mode, empty strings in png mode)
+    - Both are output lists; a PlantUML source containing multiple @start* blocks renders multiple images
+    - Note: do not use named @start blocks in PlantUML (e.g. "@startuml myname"), their outputs are
+      written under custom file names and get lost; use a plain "@start*" instead
+  - Render failures (bad code / missing tools / timeout) raise an exception and terminate execution
+    - Error messages include a stderr summary of the tool
+  - The `extra args` input appends custom command-line arguments to the target tool
+    - Shell-like splitting, quote values containing spaces with double quotes
+    - Arguments are appended after the built-in ones; repeated flags typically take the later value
+      and can override built-in behavior (e.g. graphviz's -K / -G / -N / -E)
+    - Notes:
+      - graphviz treats a repeated -T as additional output formats instead of an override; change
+        the format via the `format` port instead of passing -T
+      - likewise avoid overriding mermaid's -i / -o (products would no longer be written to
+        ComfyUI's temp directory and reading them fails)
+      - in plantuml.jar mode the arguments are consumed by PlantUML itself, not by the java launcher
+  - See section "4. Dependencies" for external rendering tool path configuration
+
+  ![DynamicDiagramNode](./documents/DynamicDiagramNode.png)
+
 ## 3. Installation
 
 - Clone this repository into ComfyUI's `custom_nodes` directory:
@@ -201,6 +230,34 @@
     or on non-NVIDIA environments, only the monitoring feature becomes unavailable,
     the rest of the plugin is not affected)
 - The dynamic diagram node (DynamicDiagramNode) requires the following external rendering tools:
+  - **`Graphviz`**
+    - Website: <https://graphviz.org/> (download: <https://graphviz.org/download/>)
+    - Install:
+      - The official installer
+      - Package managers:
+
+        ```shell
+        winget install --id Graphviz.Graphviz  # windows
+        scoop install graphviz
+        choco install graphviz
+        apt install graphviz                   # Debian/Ubuntu
+        brew install graphviz                  # macOS
+        ```
+
+    - Configure:
+      - Point `Graphviz path` to an executable (e.g. `dot.exe`) or the Graphviz
+        installation directory (the `bin` subdirectory is checked automatically)
+      - Layout engines (dot / neato / fdp etc.) are selected via the node's `layout` port
+  - **`Mermaid (mermaid-cli)`**
+    - Website: <https://mermaid.js.org/> (CLI repository: <https://github.com/mermaid-js/mermaid-cli>)
+    - Install: install Node.js first (<https://nodejs.org/>), then run
+
+      ```shell
+      npm install -g @mermaid-js/mermaid-cli
+      ```
+
+    - Configure: point `Mermaid path` to the `mmdc` executable
+      (typically `mmdc.cmd` on Windows) or its directory
   - **`PlantUML`**
     - Website: <https://plantuml.com/> (download: <https://plantuml.com/download>)
     - Install (choose one):
@@ -220,34 +277,6 @@
       - Point directly to `plantuml.jar` / the `plantuml` executable, or use the directory containing the file
       - When using the jar and `java` is not on PATH, also set `Java path`
         to the java executable or its directory
-  - **`Mermaid (mermaid-cli)`**
-    - Website: <https://mermaid.js.org/> (CLI repository: <https://github.com/mermaid-js/mermaid-cli>)
-    - Install: install Node.js first (<https://nodejs.org/>), then run
-
-      ```shell
-      npm install -g @mermaid-js/mermaid-cli
-      ```
-
-    - Configure: point `Mermaid path` to the `mmdc` executable
-      (typically `mmdc.cmd` on Windows) or its directory
-  - **`Graphviz`**
-    - Website: <https://graphviz.org/> (download: <https://graphviz.org/download/>)
-    - Install:
-      - The official installer
-      - Package managers:
-
-        ```shell
-        winget install --id Graphviz.Graphviz  # windows
-        scoop install graphviz
-        choco install graphviz
-        apt install graphviz                   # Debian/Ubuntu
-        brew install graphviz                  # macOS
-        ```
-
-    - Configure:
-      - Point `Graphviz path` to an executable (e.g. `dot.exe`) or the Graphviz
-        installation directory (the `bin` subdirectory is checked automatically)
-      - Layout engines (dot / neato / fdp etc.) are selected via the node's `layout` port
   - Notes:
     - All of them are optional: missing tools only make the corresponding engine
       unavailable, the rest of the plugin is not affected
