@@ -368,11 +368,12 @@ const SIDEBAR_PROBE_MIN_W = 8;    // 最小宽度 (px)
 const SIDEBAR_PROBE_MAX_LEFT = 2; // 距窗口左缘最大距离 (px)
 const SIDEBAR_PROBE_MIN_H = 100;  // 最小高度 (px, 排除小工具条)
 
-// 设置键 (ComfyUI settings id / localStorage 键共用)
-const SETTING_ID__RATE = "dynamic.ResourceMonitor.refreshRate";
-const SETTING_ID__LANG = "dynamic.ResourceMonitor.language";
-const SETTING_ID__OPACITY = "dynamic.ResourceMonitor.opacity";
-const SETTING_ID__ENABLE = "dynamic.ResourceMonitor.enabled";
+// 设置键 (ComfyUI settings id / localStorage 键共用);
+// 经 export 供 js/warning.js 等并列模块引用, 避免字面量多处同步
+export const SETTING_ID__RATE = "dynamic.ResourceMonitor.refreshRate";
+export const SETTING_ID__LANG = "dynamic.ResourceMonitor.language";
+export const SETTING_ID__OPACITY = "dynamic.ResourceMonitor.opacity";
+export const SETTING_ID__ENABLE = "dynamic.ResourceMonitor.enabled";
 
 // 行内图标 (SVG, currentColor 继承按钮颜色, 卸载按钮通过 CSS 置红)
 const ICONS = {

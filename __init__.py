@@ -5,6 +5,7 @@
 from comfy_api.latest import ComfyExtension, io
 
 
+from .nodes.dynamic_diagram_node import DynamicDiagramNode
 from .nodes.dynamic_load_text_node import DynamicLoadTextFileNode
 from .nodes.dynamic_none_node import DynamicNoneNode
 from .nodes.dynamic_pipe_any_node import DynamicPipeAnyNode
@@ -18,6 +19,7 @@ class DynamicExtension(ComfyExtension):
     # 注意: get_node_list 必须声明为 async
     async def get_node_list(self) -> list[type[io.ComfyNode]]:
         return [
+            DynamicDiagramNode,
             DynamicLoadTextFileNode,
             DynamicNoneNode,
             DynamicPipeAnyNode,
@@ -38,6 +40,7 @@ WEB_DIRECTORY = "./js"
 
 # 需要加载的节点类映射表
 NODE_CLASS_MAPPINGS = {
+    DynamicDiagramNode.__name__: DynamicDiagramNode,
     DynamicLoadTextFileNode.__name__: DynamicLoadTextFileNode,
     DynamicNoneNode.__name__: DynamicNoneNode,
     DynamicPipeAnyNode.__name__: DynamicPipeAnyNode,

@@ -193,13 +193,70 @@
 
 ## 4. Dependencies
 
-- No dependencies for node execution
+- Node features require no Python packages
 - The control panel (resource monitor) requires the following Python packages
   (installed automatically by ComfyUI when installing the plugin):
   - `psutil`: CPU / RAM statistics (already a dependency of the ComfyUI core, declared here explicitly)
   - `pynvml`: GPU utilization and temperature (optional, degrades automatically when missing
     or on non-NVIDIA environments, only the monitoring feature becomes unavailable,
     the rest of the plugin is not affected)
+- The dynamic diagram node (DynamicDiagramNode) requires the following external rendering tools:
+  - **`PlantUML`**
+    - Website: <https://plantuml.com/> (download: <https://plantuml.com/download>)
+    - Install (choose one):
+      - Download `plantuml.jar` from the website
+        (requires a Java runtime, e.g. <https://adoptium.net/>)
+      - Download the Windows executable (`plantuml.exe`) from the website
+      - Package managers:
+
+        ```shell
+        winget install --id PlantUML.PlantUML  # windows
+        scoop install plantuml
+        choco install plantuml
+        apt install plantuml                   # Debian/Ubuntu
+        ```
+
+    - Configure: `PlantUML path`
+      - Point directly to `plantuml.jar` / the `plantuml` executable, or use the directory containing the file
+      - When using the jar and `java` is not on PATH, also set `Java path`
+        to the java executable or its directory
+  - **`Mermaid (mermaid-cli)`**
+    - Website: <https://mermaid.js.org/> (CLI repository: <https://github.com/mermaid-js/mermaid-cli>)
+    - Install: install Node.js first (<https://nodejs.org/>), then run
+
+      ```shell
+      npm install -g @mermaid-js/mermaid-cli
+      ```
+
+    - Configure: point `Mermaid path` to the `mmdc` executable
+      (typically `mmdc.cmd` on Windows) or its directory
+  - **`Graphviz`**
+    - Website: <https://graphviz.org/> (download: <https://graphviz.org/download/>)
+    - Install:
+      - The official installer
+      - Package managers:
+
+        ```shell
+        winget install --id Graphviz.Graphviz  # windows
+        scoop install graphviz
+        choco install graphviz
+        apt install graphviz                   # Debian/Ubuntu
+        brew install graphviz                  # macOS
+        ```
+
+    - Configure:
+      - Point `Graphviz path` to an executable (e.g. `dot.exe`) or the Graphviz
+        installation directory (the `bin` subdirectory is checked automatically)
+      - Layout engines (dot / neato / fdp etc.) are selected via the node's `layout` port
+  - Notes:
+    - All of them are optional: missing tools only make the corresponding engine
+      unavailable, the rest of the plugin is not affected
+    - Tool paths are configured in the ComfyUI settings under the "Comfy Dynamic / Diagram" category
+      - Changes take effect on the next execution without restart
+    - Common path rules:
+      - Absolute paths only, may point to a file or its directory
+      - Surrounding quotes are stripped automatically (Windows "Copy as path" is supported)
+      - When left empty, the tool is looked up on the system PATH
 
 
 ## 5. Settings
@@ -224,6 +281,11 @@
   - `en` (default) / `zh`, changes take effect immediately
 - `Dynamic Resource Monitor: Panel opacity (30-100%)`
   - Default 100%, changes take effect immediately
+- `PlantUML path` / `Java path (for plantuml.jar)` / `Mermaid path` / `Graphviz path`
+  - External rendering tool paths for the dynamic diagram node (DynamicDiagramNode),
+    see the "Dependencies" section for details
+  - Left empty, tools are looked up on PATH; changes take effect on the next
+    execution without restart
 
 
 ## 6. Notes

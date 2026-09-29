@@ -1,7 +1,9 @@
 {
     "cSpell.words": [
+        "ACPI",
         "aenum",
         "bgcolor",
+        "choco",
         "Civitai",
         "cmath",
         "colorsys",
@@ -12,6 +14,7 @@
         "dynprompt",
         "fromlist",
         "functools",
+        "graphviz",
         "hashlib",
         "heapq",
         "hmac",
@@ -20,7 +23,9 @@
         "itertools",
         "jproperties",
         "kimi",
+        "mmdc",
         "numpy",
+        "NVML",
         "pathlib",
         "pnginfo",
         "psutil",
@@ -39,6 +44,7 @@
         "torchaudio",
         "torchtext",
         "torchvision",
+        "winget",
         "zoneinfo"
     ]
 }

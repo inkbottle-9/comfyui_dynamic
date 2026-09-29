@@ -185,12 +185,63 @@
 
 ## 4. 依赖
 
-- 节点功能无依赖
+- 节点功能无需安装任何 Python 包
 - 控制面板 (资源监控) 需要以下 Python 包 (安装插件时由 ComfyUI 自动安装):
   - `psutil`: CPU / 内存统计 (ComfyUI 核心已依赖, 此处显式声明)
   - `pynvml`: GPU 利用率与温度 (可选, 缺失或非 NVIDIA 环境时自动降级,
     仅监控功能不可用, 不影响插件其余功能)
+- 动态图表节点 (DynamicDiagramNode) 需要以下外部渲染工具:
+  - **`PlantUML`**
+    - 官网: <https://plantuml.com/> (下载页: <https://plantuml.com/download>)
+    - 安装 (任选其一):
+      - 官网下载 `plantuml.jar` (需要 Java 运行时, 例如 <https://adoptium.net/>)
+      - 官网下载 Windows 可执行版 (`plantuml.exe`)
+      - 包管理器:
 
+        ```shell
+        winget install --id PlantUML.PlantUML  # windows
+        scoop install plantuml
+        choco install plantuml
+        apt install plantuml                   # Debian/Ubuntu
+        ```
+
+    - 设置: `PlantUML path`
+      - 直接指向 `plantuml.jar` / `plantuml` 可执行文件, 或使用文件所在目录
+      - 使用 jar 且 `java` 不在 PATH 时, 需另设 `Java path` 指向 java 可执行文件或其所在目录
+  - **`Mermaid (mermaid-cli)`**
+    - 官网: <https://mermaid.js.org/> (CLI 仓库: <https://github.com/mermaid-js/mermaid-cli>)
+    - 安装: 先安装 Node.js (<https://nodejs.org/>), 然后执行
+
+      ```shell
+      npm install -g @mermaid-js/mermaid-cli
+      ```
+
+    - 设置: `Mermaid path` 指向 `mmdc` 可执行文件 (Windows 下通常是 `mmdc.cmd`) 或其所在目录
+  - **`Graphviz`**
+    - 官网: <https://graphviz.org/> (下载页: <https://graphviz.org/download/>)
+    - 安装:
+      - 官网安装包
+      - 包管理器:
+
+        ```shell
+        winget install --id Graphviz.Graphviz  # windows
+        scoop install graphviz
+        choco install graphviz
+        apt install graphviz                   # Debian/Ubuntu
+        brew install graphviz                  # macOS
+        ```
+
+    - 设置:
+      - `Graphviz path` 指向可执行文件 (如 `dot.exe`) 或 Graphviz 安装目录 (会自动检查 `bin` 子目录)
+      - 布局引擎 (dot / neato / fdp 等) 在节点的 `layout` 端口选择
+  - 注:
+    - 三者均为可选, 不安装不影响插件其余功能, 仅对应引擎的图表无法渲染
+    - 工具路径在 ComfyUI 设置界面的 "Comfy Dynamic / Diagram" 分类下配置
+      - 修改后下一次执行即生效, 无需重启
+    - 路径通用规则:
+      - 必须使用绝对路径, 可以指向文件或其所在目录
+      - 首尾引号会被自动剥离 (支持 Windows 的 "复制文件地址")
+      - 留空时从系统 PATH 中查找
 
 ## 5. 设置
 
@@ -214,6 +265,10 @@
   - `en` (默认) / `zh`, 修改即时生效
 - `Dynamic Resource Monitor: Panel opacity (30-100%) (面板不透明度)`
   - 默认 100%, 修改即时生效
+- `PlantUML path (PlantUML 路径)` / `Java path (Java 路径, 用于 plantuml.jar)` /
+  `Mermaid path (mermaid-cli 路径)` / `Graphviz path (Graphviz 路径)`
+  - 动态图表节点 (DynamicDiagramNode) 的外部渲染工具路径, 详细说明见 "依赖" 章节
+  - 留空时从系统 PATH 查找, 修改后下一次执行即生效, 无需重启
 
 
 ## 6. 注释

@@ -10,6 +10,22 @@
 //   该 API 在桌面端 (Electron) 与网页端行为一致; 旧版浏览器的 window.confirm 作为兜底
 // - 新增全局设置 (见下方 settings 注册), 可关闭"加载工作流时弹出安全警告"
 import { app } from "../../scripts/app.js";
+// Diagram 设置 ID (经 export 引用, 避免与 js/diagram.js 的字面量重复维护);
+// 注意 warning.js 与 diagram.js / control_panel.js 是同一 WEB_DIRECTORY 下的并列模块,
+// 相对路径导入与 CUI 的模块加载指向同一 URL, 不会引起这些文件的扩展重复注册
+import {
+    SETTING_ID__PATH_PLANTUML,
+    SETTING_ID__PATH_JAVA,
+    SETTING_ID__PATH_MERMAID,
+    SETTING_ID__PATH_GRAPHVIZ,
+} from "./diagram.js";
+// 资源监控控制面板设置 ID (经 export 引用, 避免与 js/control_panel.js 的字面量重复维护)
+import {
+    SETTING_ID__ENABLE,
+    SETTING_ID__RATE,
+    SETTING_ID__LANG,
+    SETTING_ID__OPACITY,
+} from "./control_panel.js";
 
 
 // 全局设置项
@@ -167,6 +183,16 @@ app.registerExtension({
             options: [
                 { text: SETTING_ID__WARN_ON_LOAD, value: 0 },
                 { text: SETTING_ID__ENABLE_LOGGING, value: 1 },
+                // Diagram 相关设置项 (与 js/diagram.js 导出的常量一致)
+                { text: SETTING_ID__PATH_PLANTUML, value: 2 },
+                { text: SETTING_ID__PATH_JAVA, value: 3 },
+                { text: SETTING_ID__PATH_MERMAID, value: 4 },
+                { text: SETTING_ID__PATH_GRAPHVIZ, value: 5 },
+                // 资源监控控制面板相关设置项 (经 export 引用, 与 js/control_panel.js 的设置键一致)
+                { text: SETTING_ID__ENABLE, value: 6 },
+                { text: SETTING_ID__RATE, value: 7 },
+                { text: SETTING_ID__LANG, value: 8 },
+                { text: SETTING_ID__OPACITY, value: 9 },
             ],
             tooltip: "This option is used only to display the ID of the setting items used by this plugin, and has no other practical function.",
             category: ["Comfy Dynamic", "Info", SETTING_ID__SETTINGS_INFORMATION]
