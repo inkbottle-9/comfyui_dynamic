@@ -173,9 +173,14 @@
 
 - `DynamicDiagramNode`
   - Dynamic diagram node, renders PlantUML / Mermaid / Graphviz source code into images and shows them on the node
-  - Source code comes in through the `code` string input port (pair it with a multiline string node
+  - Source code comes in through the `code` input port (pair it with a multiline string node
     or a text file reading node)
-    - The `engine` port selects the rendering engine (auto = heuristic detection)
+    - Accepts a single string or a list of strings; each list item renders as an independent
+      diagram group (a PlantUML item may still contain multiple @start* blocks)
+    - The whole list is processed in a single execution; non-string and blank list items are
+      ignored, and an empty list renders nothing (zero images, no error)
+    - The `engine` port selects the rendering engine (auto = heuristic detection per code item,
+      so list items may mix engines)
     - The `format` port selects the output format (png / svg)
   - The Graphviz layout engine (dot, neato etc.) is selected via the `layout` port, ignored by other engines
   - Outputs:
